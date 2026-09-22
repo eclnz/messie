@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "messie"
+version = "0.1.0"
+description = "Notices when a folder has become a mess. Local only, no external services."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+# Bundled-weight semantic backend: no model download, ever.
+semantic = ["wordllama>=0.4"]
+# Alternative backends, both fetch a model once on first use.
+model2vec = ["model2vec>=0.3"]
+st = ["sentence-transformers>=2.2"]
+pdf = ["pypdf>=4.0"]
+all = ["wordllama>=0.4", "pypdf>=4.0"]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[project.scripts]
+messie = "messie.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
