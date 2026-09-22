@@ -9,16 +9,17 @@ description = "Notices when a folder has become a mess. Local only, no external 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = ["numpy>=1.24"]
+# wordllama carries its own weights inside the wheel, so a plain install is
+# fully offline and always has a backend.
+dependencies = ["numpy>=1.24", "wordllama>=0.4"]
 
 [project.optional-dependencies]
-# Bundled-weight semantic backend: no model download, ever.
-semantic = ["wordllama>=0.4"]
-# Alternative backends, both fetch a model once on first use.
+# Alternative backends. Both fetch a model once on first use; neither is
+# needed, since the default backend ships with the package.
 model2vec = ["model2vec>=0.3"]
 st = ["sentence-transformers>=2.2"]
 pdf = ["pypdf>=4.0"]
-all = ["wordllama>=0.4", "pypdf>=4.0"]
+all = ["pypdf>=4.0", "model2vec>=0.3"]
 dev = ["pytest>=7.4", "ruff>=0.4", "pypdf>=4.0"]
 
 [project.scripts]

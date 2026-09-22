@@ -42,16 +42,15 @@ with each other.
 ## Install
 
 ```bash
-pip install 'messie[semantic]'     # recommended
+pip install messie
 ```
 
-The `semantic` extra pulls in [wordllama](https://pypi.org/project/wordllama/),
-whose model weights ship inside its wheel. Nothing is downloaded at analysis
-time, or ever — `pip install` is the whole story, and messie works on a machine
-that has never been online.
+That is the whole story. messie depends on
+[wordllama](https://pypi.org/project/wordllama/), whose model weights ship
+inside its wheel, so nothing is downloaded at analysis time — or ever — and it
+works on a machine that has never been online.
 
-Plain `pip install messie` also works and falls back to lexical matching (see
-*Backends*). `pip install 'messie[pdf]'` adds PDF text extraction.
+`pip install 'messie[pdf]'` adds PDF text extraction.
 
 ## Use
 
@@ -78,6 +77,7 @@ messie ~/Downloads --fail-over chaotic || notify-send "your Downloads folder"
 |---|---|
 | **unrelated topics** | two or more unrelated subjects sharing one folder — the main event |
 | **nothing in common** | no organising subject at all: every file about something different |
+| **garbled** | files whose contents have stopped being language at all |
 | **strays** | files that match nothing else present |
 | **misfiled neighbours** | loose files that read like the contents of a subfolder sitting right there |
 | **type soup** | many different *sorts* of file evenly mixed — part photo album, part installer cache |
@@ -100,20 +100,24 @@ used.
 
 | backend | quality | model download | install |
 |---|---|---|---|
-| `wordllama` | good | **none — weights are in the wheel** | `pip install 'messie[semantic]'` |
+| `wordllama` | good | **none — weights are in the wheel** | included |
 | `model2vec` | better | once, from Hugging Face | `pip install 'messie[model2vec]'` |
 | `sentence` | best, slowest | once, from Hugging Face | `pip install 'messie[st]'` |
-| `lexical` | limited | none | always available |
+
+There was once a hashed TF-IDF fallback for machines that could not fetch a
+model. Measured across the example corpus it held only about 71% of subjects
+together against wordllama's 97%, and since wordllama downloads nothing, the
+fallback bought nothing but worse verdicts. It has been removed.
 
 Pick one explicitly with `--backend`. Naming a backend that isn't installed is
 an error rather than a silent downgrade: a verdict should never quietly come
 from a weaker model than the one you asked for.
 
 Thresholds are expressed as fractions of each backend's own similarity scale, so
-one set of settings behaves sensibly across all of them. The `wordllama` and
-`lexical` scales were calibrated by sweeping the threshold through the real
-pipeline over the example corpus; the other two are estimates, since no model
-was reachable to measure them against. Override with `--threshold`.
+one set of settings behaves sensibly across all of them. The `wordllama` scale
+was calibrated by sweeping the threshold through the real pipeline over the
+example corpus; the other two are estimates, since no model was reachable to
+measure them against. Override with `--threshold`.
 
 ## Reading the contents
 
@@ -132,15 +136,34 @@ Extracted text is cached in `~/.cache/messie/`, keyed by path, size and
 modification time, so re-running on a large folder is cheap. `--no-cache` turns
 that off.
 
+## Files that say nothing
+
+Folders do not only collect unrelated things. They collect files whose contents
+have stopped meaning anything — downloads that finished corrupt, text mangled by
+an encoding round-trip, a payload saved with a `.txt` extension, a scan OCR'd
+into rubbish. Incoherence is evidence in its own right, and it has to be caught
+head on: a garbled file has no subject, so it joins no group and every signal
+that works by finding structure is blind to it. Left in the clustering, a
+handful of corrupt files will happily group together and be reported as a topic,
+so they are held out of it and counted separately.
+
+The check is deliberately cautious, because there are many ways to be legible.
+Source code, CSV extracts, logs full of hashes and minified JavaScript are all
+legitimate and none of them read like prose, so word-shape tests apply only to
+files that are meant to be prose, and tables and settings dumps are recognised
+and exempted even when saved as `.txt`. Text in a script the check cannot reason
+about — Chinese, Arabic, Hebrew, Devanagari — is given the benefit of the doubt
+rather than called gibberish for lacking Latin vowels. Across the 210 documents
+of the example corpus, nothing is flagged.
+
 ## Limitations
 
-- **The lexical backend is a good deal weaker, and measurably so.** Across the
-  35-subject example corpus it holds about 71% of subjects together while
-  keeping 82% of unrelated pairs apart; wordllama manages 97% and 84%. It
-  matches words rather than meanings, so it cannot tell that "payment due" and
-  "invoice" are the same topic, and it struggles most with files that share
-  little literal vocabulary — settings files, logs, CSV extracts. This is why
-  `messie[semantic]` is the recommended install.
+- **Static embeddings are coarse.** They compare subject matter, not argument.
+  Measured across the 35-subject example corpus, the default backend keeps 97%
+  of single-subject folders together and 84% of unrelated pairs apart — the
+  remaining 16% are adjacent subjects it files as one. Install
+  `messie[model2vec]` or `messie[st]` for a stronger model if that matters to
+  you; both fetch a model once, so they need the network that first time.
 - **Images, audio and video are judged by name and kind only.** There is no
   vision model here; a folder of photos is taken on trust.
 - **Where the line falls is a judgement call.** Are tax returns and client
@@ -192,6 +215,7 @@ that text survives a round trip through each readable format, that every file
 type is recognised by kind, and that analysing a folder leaves every file in it
 byte-for-byte untouched.
 
-Tests that need real semantic discrimination run only on the semantic backends.
-The lexical fallback is held to a lower, explicitly stated bar, so that its
-limits are recorded in executable form rather than glossed over.
+Most of the legibility tests guard against false positives rather than
+detection, because that is where the risk lies: calling somebody's minified
+JavaScript or Chinese-language report "gibberish" would be far worse than
+missing a corrupt download.

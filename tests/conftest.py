@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from messie.config import DEFAULT_SETTINGS
-from messie.embed.lexical import LexicalEmbedder
 
 _OOXML_NS = "http://schemas.openxmlformats.org"
 
@@ -117,8 +116,10 @@ RECIPE = [
 
 @pytest.fixture
 def embedder():
-    """The lexical backend: no optional dependency, no download, deterministic."""
-    return LexicalEmbedder()
+    """The default backend, shared across tests: loading it is cached."""
+    from messie.embed import get_embedder
+
+    return get_embedder("wordllama")
 
 
 @pytest.fixture

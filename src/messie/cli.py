@@ -51,16 +51,15 @@ def _doctor() -> int:
     print(f"messie {__version__}")
     print(f"cache: {default_cache_path()}")
     print("\nembedding backends, best first:")
-    any_semantic = False
+    usable = 0
     for name, ok, detail in backend_status():
         mark = "✓" if ok else "·"
         print(f"  {mark} {name:<12} {detail}")
-        if ok and name != "lexical":
-            any_semantic = True
-    if not any_semantic:
+        usable += ok
+    if not usable:
         print(
-            "\nNo semantic backend available — falling back to lexical matching.\n"
-            "For content-meaning comparison: pip install 'messie[semantic]'\n"
+            "\nNo backend is usable, so messie cannot read anything.\n"
+            "Reinstall with: pip install --force-reinstall messie\n"
             "(wordllama ships its weights in the wheel; nothing is downloaded at runtime.)"
         )
     return 0

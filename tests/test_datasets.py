@@ -29,11 +29,7 @@ from messie.analyze import analyze_dir
 from messie.embed import get_embedder
 from messie.score import Verdict
 
-BACKENDS = ["lexical", "wordllama"]
-
-#: Backends that compare meaning. Only these are held to the strict standard of
-#: recognising a subject; see ``test_lexical_is_weaker_and_we_know_it``.
-SEMANTIC_BACKENDS = ["wordllama", "model2vec", "sentence"]
+BACKENDS = SEMANTIC_BACKENDS = ["wordllama", "model2vec", "sentence"]
 
 #: Subjects that do not hold together even for a semantic backend, and why.
 #: Measured against the example corpus: 34 of 35 topics form a single group.
@@ -66,9 +62,9 @@ INSTALLED_SEMANTIC = _installed(SEMANTIC_BACKENDS)
 _NO_SEMANTIC = [pytest.param(None, marks=pytest.mark.skip(reason="no semantic backend"))]
 
 
-@pytest.fixture(params=BACKENDS)
+@pytest.fixture(params=INSTALLED_SEMANTIC or _NO_SEMANTIC)
 def real_embedder(request):
-    """Every backend that is installed, lexical included."""
+    """Every backend that is installed."""
     return backend_or_skip(request.param)
 
 
@@ -129,25 +125,6 @@ def test_a_single_subject_folder_is_not_a_mess(topic, tmp_path, semantic_embedde
     assert "unrelated_topics" not in codes(analysis)
     assert "no_common_thread" not in codes(analysis)
     assert analysis.verdict < Verdict.MESSY
-
-
-def test_lexical_is_weaker_and_we_know_it(tmp_path):
-    """The lexical fallback is held to a lower bar, on purpose.
-
-    It matches words rather than meanings, so it cannot tell that two settings
-    files or two log files are the same kind of thing when they share little
-    literal vocabulary. Measured across the example corpus it holds roughly
-    two thirds of subjects together, against nearly all of them for a semantic
-    backend. That gap is the reason ``messie[semantic]`` is the recommended
-    install, and this test exists to notice if the gap ever widens.
-    """
-    embedder = backend_or_skip("lexical")
-    coherent = 0
-    for topic in ALL_TOPICS:
-        folder = build_coherent(tmp_path / topic, topic, 6)
-        if analyze_dir(folder, embedder=embedder).clustering.n_clusters == 1:
-            coherent += 1
-    assert coherent / len(ALL_TOPICS) >= 0.60
 
 
 # --- mess -------------------------------------------------------------------

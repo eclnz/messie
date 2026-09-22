@@ -35,7 +35,9 @@ def test_handles_a_corrupt_docx_without_raising(tmp_path: Path):
 
 def test_reads_plain_text_and_strips_whitespace(tmp_path: Path):
     path = write_text(tmp_path / "notes.md", "# Heading\n\n  spaced   out  \n")
-    assert extract_text(_entry(path)) == "# Heading spaced out"
+    # Runs of spaces collapse, but line structure survives: it is what tells a
+    # table apart from prose when judging whether text is legible at all.
+    assert extract_text(_entry(path)) == "# Heading\n\nspaced out"
 
 
 def test_decodes_non_utf8(tmp_path: Path):

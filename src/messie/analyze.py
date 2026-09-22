@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -27,6 +28,7 @@ from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
 from messie.kinds import kind_phrase
 from messie.label import file_terms, format_label, label_clusters
+from messie.legibility import Legibility, assess
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.score import Verdict, score_findings
 from messie.signals import Finding, run_all
@@ -38,8 +40,14 @@ _MIX_THIN = (0.45, 0.40, 0.15)
 _MIX_NAME = (0.00, 0.80, 0.20)
 _MIX_KIND = (0.00, 0.00, 1.00)
 
-#: What vectorize() hands back: (texts, vectors, topical mask, per-file terms).
-VectorRecord = tuple[list[str], np.ndarray, np.ndarray, list[Counter]]
+class VectorRecord(NamedTuple):
+    """What vectorize() hands back for one folder."""
+
+    texts: list[str]
+    vectors: np.ndarray
+    topical: np.ndarray
+    terms: list[Counter]
+    legibility: list[Legibility]
 
 
 @dataclass
@@ -53,6 +61,7 @@ class DirAnalysis:
     files: list[FileEntry] = field(default_factory=list)
     texts: list[str] = field(default_factory=list)
     terms: list[Counter] = field(default_factory=list)
+    legibility: list[Legibility] = field(default_factory=list)
     vectors: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), np.float32))
     topical: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     clustering: Clustering | None = None
@@ -118,9 +127,8 @@ class Engine:
             settings.cluster_threshold_override,
         )
         # The cache holds extracted text, which is the expensive part: reading
-        # and decompressing files off disk. Vectors are deliberately not cached
-        # — the lexical backend's depend on the corpus they were built with, and
-        # embedding is cheap next to the disk read.
+        # and decompressing files off disk. Vectors are not cached; embedding is
+        # cheap next to the disk read.
         self.cache = cache if cache is not None else Cache(enabled=False)
 
     # --- text ---------------------------------------------------------------
@@ -165,6 +173,10 @@ class Engine:
         texts = [self._text_for(f) for f in files]
         names = self._name_phrases(files)
         kinds = [kind_phrase(f.kind) for f in files]
+        floor = self.settings.legibility_floor
+        legible = [
+            assess(t, f.kind, f.ext, floor) for f, t in zip(files, texts, strict=True)
+        ]
 
         text_vecs = self.embedder.encode(texts)
         name_vecs = self.embedder.encode(names)
@@ -179,6 +191,12 @@ class Engine:
             if entry.kind == "junk" or entry.size == 0:
                 # Debris has no subject. Leaving it at zero keeps it out of every
                 # topic group, so a folder's themes are not padded with leftovers.
+                continue
+            if legible[i].garbled:
+                # Garbled text has no subject either, and its vector is noise.
+                # Left in, a few corrupt files would cheerfully cluster together
+                # and be reported as a topic. They are counted by their own
+                # signal instead.
                 continue
 
             has_text = bool(text.strip())
@@ -198,7 +216,7 @@ class Engine:
             topical[i] = has_text or has_name
 
         terms = [file_terms(f.stem, t) for f, t in zip(files, texts, strict=True)]
-        return texts, normalise(out), topical, terms
+        return VectorRecord(texts, normalise(out), topical, terms, legible)
 
     @staticmethod
     def profile_of(vectors: np.ndarray) -> np.ndarray:
@@ -245,13 +263,13 @@ class Engine:
             )
             return analysis
 
-        texts, vectors, topical, terms = precomputed or self.vectorize(contents.files)
-        analysis.texts, analysis.vectors, analysis.topical, analysis.terms = (
-            texts,
-            vectors,
-            topical,
-            terms,
-        )
+        record = precomputed or self.vectorize(contents.files)
+        texts, vectors, topical, terms = record[:4]
+        analysis.texts = texts
+        analysis.vectors = vectors
+        analysis.topical = topical
+        analysis.terms = terms
+        analysis.legibility = record.legibility
         analysis.clustering = cluster_vectors(vectors, self.thresholds.cluster)
         analysis.cluster_labels = label_clusters(
             analysis.clustering.labels, terms, analysis.clustering.n_clusters

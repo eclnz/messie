@@ -41,6 +41,9 @@ class Settings:
 
     # --- content ------------------------------------------------------------
     text_excerpt_chars: int = 4000
+    #: Below this legibility score a file is reported as garbled and kept
+    #: out of the topic clustering. See messie.legibility.
+    legibility_floor: float = 0.45
     max_read_bytes: int = 1 << 20  # never read more than 1 MiB off disk per file
     # Below this much extracted text, lean on the filename instead of content.
     min_text_chars: int = 120
@@ -77,6 +80,7 @@ class Settings:
         default_factory=lambda: {
             "unrelated_topics": 1.00,
             "no_common_thread": 0.70,
+            "garbled": 0.55,
             "misfiled_neighbours": 0.60,
             "strays": 0.55,
             "type_soup": 0.50,

@@ -444,3 +444,73 @@ def write_file(path: Path, text: str = "") -> Path:
             return writer(path)
         return writer(path, seed=text[:32] or path.stem)
     return write_plain(path, text)
+
+
+# --- files that say nothing -------------------------------------------------
+
+_GARBLED_PROSE = (
+    "Le café était déjà fermé, donc nous sommes rentrés à l'hôtel très tard. "
+    "L'été prochain nous irons à Montréal pour la conférence annuelle. "
+)
+
+
+def _mojibake(seed: str) -> str:
+    """Text put through the encoding wringer, as a bad export leaves it."""
+    return (_GARBLED_PROSE * 6).encode("utf-8").decode("cp1252", errors="replace")
+
+
+def _random_letters(seed: str) -> str:
+    rng = _rng(seed)
+    return " ".join(
+        "".join(rng.choice("bcdfghjklmnpqrstvwxz") for _ in range(rng.randrange(3, 13)))
+        for _ in range(220)
+    )
+
+
+def _rng(seed: str):
+    import random
+
+    return random.Random(seed)
+
+
+def _binary_text(seed: str) -> str:
+    rng = _rng(seed)
+    return bytes(rng.randrange(256) for _ in range(3000)).decode("latin-1")
+
+
+def _base64_blob(seed: str) -> str:
+    rng = _rng(seed)
+    return base64.b64encode(bytes(rng.randrange(256) for _ in range(2200))).decode("ascii")
+
+
+def _hex_dump(seed: str) -> str:
+    return hashlib.sha256(seed.encode()).hexdigest() * 45
+
+
+def _ocr_noise(seed: str) -> str:
+    return "l1ke th1s w1th m4ny 3rr0rs |l1 rn rn 0f th3 sc4n w4s v3ry b4d " * 22
+
+
+def _repeated_filler() -> str:
+    return "A" * 2200
+
+
+GARBLE_FLAVOURS: dict[str, object] = {
+    "mojibake": _mojibake,
+    "random letters": _random_letters,
+    "binary": _binary_text,
+    "base64": _base64_blob,
+    "hex": _hex_dump,
+    "ocr": _ocr_noise,
+    "filler": lambda seed: _repeated_filler(),
+    "nulls": lambda seed: "\x00" * 1600 + "report",
+}
+
+
+def garbled_text(flavour: str, seed: str = "x") -> str:
+    """Text of a given kind of nonsense. Deterministic for a given seed."""
+    return GARBLE_FLAVOURS[flavour](seed)  # type: ignore[operator]
+
+
+def write_garbled(path: Path, flavour: str = "mojibake", seed: str = "x") -> Path:
+    return write_file(path, garbled_text(flavour, seed))

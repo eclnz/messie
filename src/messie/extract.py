@@ -20,10 +20,14 @@ from messie.kinds import is_textual
 from messie.scan import FileEntry
 
 _TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"\s+")
+# Collapse runs of spaces and tabs, but keep newlines: line structure is what
+# tells a table apart from prose, and messie's legibility check needs it.
+_WS_RE = re.compile(r"[^\S\n]+")
+_BLANK_RE = re.compile(r"\n{3,}")
 # OOXML marks paragraph and cell boundaries; turn them into spaces, not nothing,
 # so words from adjacent runs do not get glued together.
-_BREAK_RE = re.compile(r"</(w:p|w:tab|a:p|text:p|p|div|br|li|tr|td)\b[^>]*>", re.IGNORECASE)
+_BREAK_RE = re.compile(r"</(w:p|a:p|text:p|p|div|li|tr)\b[^>]*>", re.IGNORECASE)
+_INLINE_BREAK_RE = re.compile(r"</(w:tab|br|td|si)\b[^>]*>", re.IGNORECASE)
 _RTF_CTRL_RE = re.compile(r"\\[a-z]+-?\d*\s?|[{}]", re.IGNORECASE)
 
 #: Which member files inside each zip-based format actually hold prose.
@@ -39,12 +43,15 @@ _ZIP_MEMBERS: dict[str, tuple[str, ...]] = {
 
 
 def _clean(text: str, limit: int) -> str:
-    text = _WS_RE.sub(" ", text).strip()
-    return text[:limit]
+    text = _WS_RE.sub(" ", text)
+    text = _BLANK_RE.sub("\n\n", text)
+    text = "\n".join(line.strip() for line in text.split("\n"))
+    return text.strip()[:limit]
 
 
 def _strip_markup(xml: str) -> str:
-    return unescape(_TAG_RE.sub("", _BREAK_RE.sub(" ", xml)))
+    spaced = _INLINE_BREAK_RE.sub(" ", xml)
+    return unescape(_TAG_RE.sub("", _BREAK_RE.sub("\n", spaced)))
 
 
 def _from_zip_xml(path: Path, ext: str, limit: int) -> str:

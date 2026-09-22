@@ -12,7 +12,7 @@ from messie.analyze import analyze_dir, analyze_tree
 from messie.embed import BackendUnavailable, get_embedder
 from messie.score import Verdict
 
-BACKENDS = ["lexical", "wordllama"]
+BACKENDS = ["wordllama", "model2vec", "sentence"]
 
 
 def backend_or_skip(name):

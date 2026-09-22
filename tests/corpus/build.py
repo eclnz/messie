@@ -12,7 +12,14 @@ import time
 from pathlib import Path
 
 from corpus import EXTENSIONS, TOPICS
-from corpus.synth import write_empty, write_file, write_image, write_plain
+from corpus.synth import (
+    GARBLE_FLAVOURS,
+    write_empty,
+    write_file,
+    write_garbled,
+    write_image,
+    write_plain,
+)
 
 DAY = 86400.0
 
@@ -183,3 +190,25 @@ def add_installers(folder: Path, *, seed: int = 0) -> list[Path]:
     names = ["ZoomInstaller.dmg", "AdobeReader_setup.exe", "node-v20.11.0.pkg",
              "obsidian_1.5.3_amd64.deb", "Blender-4.0.AppImage"]
     return [write_file(folder / name, name) for name in names]
+
+
+def add_garbled(folder: Path, count: int = 5, *, seed: int = 0) -> list[Path]:
+    """Files whose contents have stopped meaning anything.
+
+    One of each flavour of nonsense: a bad encoding round-trip, a payload saved
+    with the wrong extension, a scan OCR'd into rubbish, a corrupt download.
+    """
+    rng = random.Random(f"garbled:{seed}")
+    flavours = list(GARBLE_FLAVOURS)
+    names = [
+        "scanned contract", "notes from meeting", "exported report",
+        "chapter draft", "receipt march", "address list", "old backup notes",
+        "invoice archive",
+    ]
+    written = []
+    for i in range(count):
+        flavour = flavours[i % len(flavours)]
+        stem = names[i % len(names)]
+        ext = rng.choice(["txt", "txt", "md", "docx", "rtf"])
+        written.append(write_garbled(_unique(folder, stem, ext), flavour, seed=f"{seed}:{i}"))
+    return written

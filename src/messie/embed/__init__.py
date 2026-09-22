@@ -1,23 +1,28 @@
 """Turning file text into vectors, locally.
 
-Backends are tried best-first. Every one of them runs on this machine; none is
-required for messie to work, because the lexical backend needs nothing but
-numpy and always exists.
+Backends are tried best-first, and every one of them runs on this machine.
 
     wordllama   static embeddings, weights ship inside the wheel — no download
     model2vec   static embeddings, fetches a model once on first use
     sentence    sentence-transformers, best quality, heaviest
-    lexical     hashed TF-IDF, no model at all
+
+wordllama is a hard dependency rather than one option among several, so there
+is always a backend and it never needs the network. There was once a hashed
+TF-IDF fallback for machines that could not fetch a model; measured against the
+example corpus it held only about 71% of subjects together against wordllama's
+97%, and since wordllama downloads nothing the fallback bought nothing. A
+second-rate verdict is worse than an honest dependency.
 """
 
 from __future__ import annotations
 
+from functools import cache
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
 #: Preference order for automatic selection.
-BACKEND_ORDER: tuple[str, ...] = ("wordllama", "model2vec", "sentence", "lexical")
+BACKEND_ORDER: tuple[str, ...] = ("wordllama", "model2vec", "sentence")
 
 
 @runtime_checkable
@@ -62,7 +67,9 @@ def encode_nonblank(texts: list[str], encode_fn, dim: int) -> np.ndarray:
     return normalise(out)
 
 
+@cache
 def _load(name: str) -> Embedder:
+    """Load a backend, once. Inference is stateless, so sharing is safe."""
     if name == "wordllama":
         from messie.embed.wordllama_backend import WordLlamaEmbedder
 
@@ -75,10 +82,6 @@ def _load(name: str) -> Embedder:
         from messie.embed.sentence_backend import SentenceEmbedder
 
         return SentenceEmbedder()
-    if name == "lexical":
-        from messie.embed.lexical import LexicalEmbedder
-
-        return LexicalEmbedder()
     raise BackendUnavailable(f"unknown backend {name!r}")
 
 
