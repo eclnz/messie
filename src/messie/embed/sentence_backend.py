@@ -11,7 +11,8 @@ _DEFAULT_MODEL = "all-MiniLM-L6-v2"
 
 class SentenceEmbedder:
     name = "sentence"
-    scale = 0.45
+    #: Estimated, not measured — see Model2VecEmbedder.
+    scale = 0.50
 
     def __init__(self, model_name: str = _DEFAULT_MODEL) -> None:
         try:

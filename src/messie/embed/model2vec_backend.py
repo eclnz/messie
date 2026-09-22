@@ -11,6 +11,8 @@ _DEFAULT_MODEL = "minishlab/potion-base-8M"
 
 class Model2VecEmbedder:
     name = "model2vec"
+    #: Estimated, not measured — no model was reachable to calibrate against.
+    #: Tune with --threshold if this backend proves over- or under-eager.
     scale = 0.45
 
     def __init__(self, model_name: str = _DEFAULT_MODEL) -> None:

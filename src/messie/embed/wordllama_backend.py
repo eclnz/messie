@@ -46,8 +46,10 @@ def _seed_tokenizer(wordllama_cls) -> None:
 
 class WordLlamaEmbedder:
     name = "wordllama"
-    #: Same-topic pairs land near here; see Thresholds.derive.
-    scale = 0.35
+    #: Measured against the example corpus in tests/corpus: at the threshold
+    #: this implies, 97% of single-subject folders form exactly one group and
+    #: 84% of two-subject folders stay apart.
+    scale = 0.40
 
     def __init__(self, dim: int = 256) -> None:
         try:

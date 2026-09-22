@@ -76,6 +76,7 @@ class Settings:
     signal_weights: dict[str, float] = field(
         default_factory=lambda: {
             "unrelated_topics": 1.00,
+            "no_common_thread": 0.70,
             "misfiled_neighbours": 0.60,
             "strays": 0.55,
             "type_soup": 0.50,

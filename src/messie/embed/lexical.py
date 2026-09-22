@@ -44,8 +44,12 @@ def _features(text: str, max_words: int) -> Counter[str]:
 
 class LexicalEmbedder:
     name = "lexical"
-    #: Hashed TF-IDF is sparse, so even same-topic pairs score low.
-    scale = 0.15
+    #: Measured against the example corpus in tests/corpus. This is the best
+    #: available compromise rather than a good one: at no threshold does this
+    #: backend both hold subjects together and keep different ones apart —
+    #: the peak is roughly 71% and 82%, against 97% and 84% for wordllama.
+    #: Matching words is simply weaker than matching meanings.
+    scale = 0.29
 
     def __init__(self, dim: int = _DIM, max_words: int = 600) -> None:
         self.dim = dim

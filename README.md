@@ -77,6 +77,7 @@ messie ~/Downloads --fail-over chaotic || notify-send "your Downloads folder"
 | | |
 |---|---|
 | **unrelated topics** | two or more unrelated subjects sharing one folder — the main event |
+| **nothing in common** | no organising subject at all: every file about something different |
 | **strays** | files that match nothing else present |
 | **misfiled neighbours** | loose files that read like the contents of a subfolder sitting right there |
 | **type soup** | many different *sorts* of file evenly mixed — part photo album, part installer cache |
@@ -109,7 +110,10 @@ an error rather than a silent downgrade: a verdict should never quietly come
 from a weaker model than the one you asked for.
 
 Thresholds are expressed as fractions of each backend's own similarity scale, so
-the same settings behave sensibly across all of them.
+one set of settings behaves sensibly across all of them. The `wordllama` and
+`lexical` scales were calibrated by sweeping the threshold through the real
+pipeline over the example corpus; the other two are estimates, since no model
+was reachable to measure them against. Override with `--threshold`.
 
 ## Reading the contents
 
@@ -130,15 +134,46 @@ that off.
 
 ## Limitations
 
-- **The lexical backend matches words, not meanings.** It will separate subjects
-  that use different vocabulary, but it cannot tell that "payment due" and
-  "invoice" are the same topic. That is what the semantic backends are for.
+- **The lexical backend is a good deal weaker, and measurably so.** Across the
+  35-subject example corpus it holds about 71% of subjects together while
+  keeping 82% of unrelated pairs apart; wordllama manages 97% and 84%. It
+  matches words rather than meanings, so it cannot tell that "payment due" and
+  "invoice" are the same topic, and it struggles most with files that share
+  little literal vocabulary — settings files, logs, CSV extracts. This is why
+  `messie[semantic]` is the recommended install.
 - **Images, audio and video are judged by name and kind only.** There is no
   vision model here; a folder of photos is taken on trust.
 - **Where the line falls is a judgement call.** Are tax returns and client
   invoices one subject or two? A semantic backend will usually say one. Tune
   with `--threshold` if your sense of it differs.
 - **Scanned PDFs have no text to read.** There is no OCR.
+
+## Example datasets
+
+`tests/corpus/` holds 35 subjects and 210 documents across three domains —
+office paperwork, developer files and personal clutter — together with builders
+that turn any of it into real files of thirty-odd types. `.docx`, `.pptx`,
+`.xlsx`, `.odt`, `.epub`, `.pdf`, `.rtf`, `.ipynb` and the plain-text family
+carry their text for real; photos, audio, video, installers, disk images,
+archives, fonts and SQLite files get genuine headers and containers, because
+messie never decodes those and generating a real JPEG would only test the
+generator.
+
+To see it work on something substantial:
+
+```bash
+python scripts/build_demo_tree.py /tmp/demo
+messie /tmp/demo --all
+```
+
+That writes ~190 files across 29 extensions into folders ranging from genuinely
+tidy to hopeless: a Downloads drawer of unrelated subjects and debris, loose
+paperwork sitting beside the subfolder it belongs with, a wedding album, a music
+library, a coherent code project, and a Desktop where every single file is about
+something different. Everything is synthetic and deterministic for a given seed.
+
+The builders are also what the tests are made of, so a folder that catches a
+false positive can be turned into a regression test directly.
 
 ## Development
 
@@ -150,6 +185,13 @@ ruff check src tests
 
 `MESSIE_DEBUG=1` makes a signal that raises crash instead of being skipped.
 
-The test suite builds real folders on disk — including genuine `.docx` archives
-— and runs the whole pipeline against every installed backend. It also asserts
-that analysing a folder leaves every file in it byte-for-byte untouched.
+The test suite builds real folders on disk and runs the whole pipeline against
+every installed backend. As well as the signals themselves it checks that every
+corpus subject is internally coherent — ground truth the other tests depend on —
+that text survives a round trip through each readable format, that every file
+type is recognised by kind, and that analysing a folder leaves every file in it
+byte-for-byte untouched.
+
+Tests that need real semantic discrimination run only on the semantic backends.
+The lexical fallback is held to a lower, explicitly stated bar, so that its
+limits are recorded in executable form rather than glossed over.

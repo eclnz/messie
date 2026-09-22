@@ -101,7 +101,10 @@ def _from_html(path: Path, limit: int, max_bytes: int) -> str:
 def _from_pdf(path: Path, limit: int) -> str:
     try:
         from pypdf import PdfReader
-    except ImportError:
+    except Exception:  # noqa: BLE001
+        # Not just ImportError: pypdf pulls in compiled crypto backends, and a
+        # mismatched one raises from native code at import time. A PDF reader
+        # that cannot load is a missing feature, never a crash.
         return ""
     try:
         reader = PdfReader(str(path))

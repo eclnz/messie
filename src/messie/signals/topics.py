@@ -105,6 +105,65 @@ def unrelated_topics(analysis: DirAnalysis) -> list[Finding]:
     ]
 
 
+def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
+    """Share of readable files belonging to no group worth the name.
+
+    Returns the fraction and the indices of the files we could actually read.
+    """
+    clustering = analysis.clustering
+    eligible = np.flatnonzero(analysis.topical)
+    if clustering is None or eligible.size == 0:
+        return 0.0, eligible
+    meaningful = set(analysis.meaningful_clusters())
+    grouped = sum(1 for i in eligible if int(clustering.labels[i]) in meaningful)
+    return 1.0 - grouped / int(eligible.size), eligible
+
+
+@signal
+def no_common_thread(analysis: DirAnalysis) -> list[Finding]:
+    """A folder with no organising subject at all.
+
+    This is the case the clustering signal cannot see. ``unrelated_topics``
+    needs groups to compare, and a folder where every single file is about
+    something different has none — so at the point the mess is total, the
+    flagship signal goes quiet. Saying so has to be done by counting the
+    absence of structure rather than by finding it.
+    """
+    clustering = analysis.clustering
+    if clustering is None:
+        return []
+
+    loose, eligible = _loose_fraction(analysis)
+    if eligible.size < analysis.settings.min_files_to_judge:
+        return []
+
+    severity = ramp(loose, 0.5, 0.95)
+    if severity <= 0:
+        return []
+
+    subjects = len({int(clustering.labels[i]) for i in eligible if clustering.labels[i] >= 0})
+    loners = [int(i) for i in eligible if int(clustering.labels[i]) not in
+              set(analysis.meaningful_clusters())]
+
+    return [
+        Finding(
+            code="no_common_thread",
+            severity=severity,
+            headline="Nothing in this folder goes with anything else.",
+            detail=(
+                f"{eligible.size} readable files and {subjects} different subjects "
+                f"between them — there is no thread running through this folder."
+            ),
+            examples=analysis.names(loners, limit=4),
+            data={
+                "readable": int(eligible.size),
+                "subjects": subjects,
+                "loose_fraction": round(loose, 3),
+            },
+        )
+    ]
+
+
 @signal
 def strays(analysis: DirAnalysis) -> list[Finding]:
     """Files that match nothing else here.
@@ -117,8 +176,13 @@ def strays(analysis: DirAnalysis) -> list[Finding]:
     if clustering is None or analysis.n_files < 2:
         return []
 
-    eligible = np.flatnonzero(analysis.topical)
+    loose, eligible = _loose_fraction(analysis)
     if eligible.size < 4:
+        return []
+    if loose >= 0.5:
+        # Nearly everything here stands alone, which is not "a few files do not
+        # belong" but "there is nothing to belong to". no_common_thread says
+        # that better, and counting it twice would inflate the score.
         return []
 
     floor = analysis.thresholds.stray
