@@ -18,11 +18,8 @@ folders. It exists to notice if that rate ever climbs back.
 
 from __future__ import annotations
 
-import os
-import sysconfig
-from pathlib import Path
-
 import pytest
+from realdirs import MINIMUM_FOLDERS, coherent_folders
 
 from messie.analyze import analyze_dir
 from messie.score import Verdict
@@ -32,47 +29,9 @@ from messie.score import Verdict
 #: flagging packages for resembling their own subpackages.
 FALSE_POSITIVE_BUDGET = 0.10
 
-#: Enough folders for the rate to mean anything.
-MINIMUM_FOLDERS = 25
-_MAX_FOLDERS = 90
-
-
-def _real_roots() -> list[Path]:
-    roots = []
-    for key in ("stdlib", "purelib", "platlib"):
-        path = sysconfig.get_paths().get(key)
-        if path and Path(path).is_dir():
-            roots.append(Path(path))
-    here = Path(__file__).resolve().parent.parent
-    if here.is_dir():
-        roots.append(here)
-    return roots
-
-
-def _coherent_folders() -> list[Path]:
-    """Real directories with enough files in them to be worth judging.
-
-    Directories named like tests are skipped: a test-data folder is a grab bag
-    on purpose and proves nothing either way.
-    """
-    found: list[Path] = []
-    for root in _real_roots():
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(
-                d for d in dirnames if not d.startswith((".", "__pycache__", "test"))
-            )
-            if len(filenames) >= 8:
-                found.append(Path(dirpath))
-            if len(found) >= _MAX_FOLDERS:
-                break
-        if len(found) >= _MAX_FOLDERS:
-            break
-    return sorted(set(found))[:_MAX_FOLDERS]
-
-
 @pytest.fixture(scope="module")
 def judged() -> list:
-    folders = _coherent_folders()
+    folders = coherent_folders()
     if len(folders) < MINIMUM_FOLDERS:
         pytest.skip(f"only {len(folders)} real folders available")
     out = []

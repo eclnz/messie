@@ -14,6 +14,7 @@ docstring is one they discover the hard way.
 from __future__ import annotations
 
 import pytest
+from conftest import backend_or_skip, codes, finding
 from corpus import ACCENTED_TOPICS, DEV_TOPICS, OFFICE_TOPICS, PERSONAL_TOPICS
 from corpus.build import (
     add_same_document_in_many_formats,
@@ -26,7 +27,6 @@ from corpus.build import (
 )
 
 from messie.analyze import analyze_dir
-from messie.embed import get_embedder
 from messie.score import Verdict
 from messie.tokens import base_stem, name_tokens
 
@@ -35,18 +35,8 @@ BACKEND = "wordllama"
 
 @pytest.fixture(scope="module")
 def embedder():
-    try:
-        return get_embedder(BACKEND)
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"{BACKEND} unavailable: {exc}")
+    return backend_or_skip(BACKEND)
 
-
-def codes(analysis) -> set[str]:
-    return {f.code for f in analysis.findings}
-
-
-def finding(analysis, code):
-    return next(f for f in analysis.findings if f.code == code)
 
 
 # --- accented English -------------------------------------------------------

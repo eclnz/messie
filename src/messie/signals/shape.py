@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from messie.signals import Finding, ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.analyze import DirAnalysis
+    from messie.result import DirAnalysis
 
 
 @signal

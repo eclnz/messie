@@ -15,7 +15,7 @@ from messie.signals import Finding, ramp, signal
 from messie.tokens import base_stem, version_markers
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.analyze import DirAnalysis
+    from messie.result import DirAnalysis
 
 _HEAD_BYTES = 65536
 _FULL_HASH_LIMIT = 64 << 20  # don't read a 4 GB video twice to prove it's a twin

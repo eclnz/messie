@@ -6,20 +6,12 @@ The first test here is the one that matters: the case the tool was built for.
 from __future__ import annotations
 
 import pytest
-from conftest import snapshot, write_blob, write_docx
+from conftest import SEMANTIC_BACKENDS, backend_or_skip, snapshot, write_blob, write_docx
 
 from messie.analyze import analyze_dir, analyze_tree
-from messie.embed import BackendUnavailable, get_embedder
 from messie.score import Verdict
 
-BACKENDS = ["wordllama", "model2vec", "sentence"]
-
-
-def backend_or_skip(name):
-    try:
-        return get_embedder(name)
-    except (BackendUnavailable, Exception) as exc:  # noqa: BLE001
-        pytest.skip(f"{name} unavailable: {exc}")
+BACKENDS = SEMANTIC_BACKENDS
 
 
 @pytest.fixture(params=BACKENDS)

@@ -203,3 +203,50 @@ def snapshot(root: Path) -> dict[str, tuple[int, float]]:
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }
+
+
+# --- shared helpers ---------------------------------------------------------
+#
+# These lived in three test modules apiece. conftest is already on the import
+# path for every test file, so this is where one copy belongs.
+
+#: Backends that compare meaning, best first.
+SEMANTIC_BACKENDS = ["wordllama", "model2vec", "sentence"]
+
+
+def backend_or_skip(name: str):
+    """The named backend, or skip the test if it is not installed."""
+    from messie.embed import get_embedder
+
+    try:
+        return get_embedder(name)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"{name} unavailable: {exc}")
+
+
+def installed(names: list[str]) -> list[str]:
+    """Which of ``names`` can actually be loaded.
+
+    Resolved once at collection so absent backends do not litter a run with
+    hundreds of skipped parametrisations.
+    """
+    from messie.embed import get_embedder
+
+    out = []
+    for name in names:
+        try:
+            get_embedder(name)
+        except Exception:  # noqa: BLE001
+            continue
+        out.append(name)
+    return out
+
+
+def codes(analysis) -> set[str]:
+    """The finding codes an analysis produced."""
+    return {f.code for f in analysis.findings}
+
+
+def finding(analysis, code: str):
+    """The one finding with this code. Raises if the signal stayed quiet."""
+    return next(f for f in analysis.findings if f.code == code)

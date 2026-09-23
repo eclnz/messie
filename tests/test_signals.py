@@ -11,19 +11,12 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import write_blob, write_text
+from conftest import codes, finding, write_blob, write_text
 
 from messie.analyze import analyze_dir
 
 DAY = 86400.0
 
-
-def codes(analysis) -> set[str]:
-    return {f.code for f in analysis.findings}
-
-
-def finding(analysis, code):
-    return next(f for f in analysis.findings if f.code == code)
 
 
 #: Bodies have to clear ``min_text_chars``, or the signals that ask whether a
@@ -246,7 +239,6 @@ def test_no_signal_raises(tmp_path, fake_embedder, marker, monkeypatch):
     folder = tmp_path / "x"
     topic_files(folder, marker, 8)
     write_blob(folder / "thing.jpg")
-    from messie.signals import failed_signals
 
-    analyze_dir(folder, embedder=fake_embedder)
-    assert failed_signals == []
+    analysis = analyze_dir(folder, embedder=fake_embedder)
+    assert analysis.failed_signals == []

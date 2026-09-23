@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 
 # Directories that are somebody else's business: package caches, VCS internals,
 # OS-managed trees. Their internal chaos is not the user's mess.
@@ -72,8 +74,11 @@ class Settings:
     time_strata_gap_days: float = 365.0
 
     # --- scoring ------------------------------------------------------------
-    signal_weights: dict[str, float] = field(
-        default_factory=lambda: {
+    #: Read-only on purpose. ``Settings`` is frozen, but ``with_()`` hands the
+    #: same dict to the copy, so a plain dict here means mutating one settings
+    #: object silently rewrites every other one derived from it.
+    signal_weights: Mapping[str, float] = field(
+        default_factory=lambda: MappingProxyType({
             "unrelated_topics": 1.00,
             # Two wordings of one signal at different intensities, so they must
             # weigh the same: otherwise the score would jump at the point where
@@ -92,7 +97,7 @@ class Settings:
             "debris": 0.35,
             "version_pileups": 0.35,
             "duplicates": 0.30,
-        }
+        })
     )
 
     def with_(self, **kwargs) -> Settings:

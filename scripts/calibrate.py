@@ -48,6 +48,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 
 from corpus import ALL_TOPICS, TOPICS  # noqa: E402
 from corpus.build import build_coherent, build_mixed  # noqa: E402
+from realdirs import coherent_folders  # noqa: E402
 
 from messie.analyze import Engine  # noqa: E402
 from messie.cluster import cluster_vectors  # noqa: E402
@@ -188,7 +189,7 @@ def sweep_threshold(
 
     return Sweep(
         backend=backend,
-        shipped_scale=float(getattr(get_embedder(backend), "scale", 0.0)),
+        shipped_scale=float(get_embedder(backend).scale),
         best=max(points, key=lambda p: p.total),
         points=points,
     )
@@ -202,35 +203,12 @@ def measure_real_world(limit: int = 90) -> RealWorld:
     world. This is how ``garbled`` was caught: perfect on synthetic nonsense,
     wrong on every real file it flagged.
     """
-    import os
-    import sysconfig
-
     from messie.analyze import analyze_dir
-
-    roots = []
-    for key in ("stdlib", "purelib", "platlib"):
-        path = sysconfig.get_paths().get(key)
-        if path and Path(path).is_dir():
-            roots.append(Path(path))
-    roots.append(_ROOT)
-
-    folders: list[Path] = []
-    for root in roots:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(
-                d for d in dirnames if not d.startswith((".", "__pycache__", "test"))
-            )
-            if len(filenames) >= 8:
-                folders.append(Path(dirpath))
-            if len(folders) >= limit:
-                break
-        if len(folders) >= limit:
-            break
 
     judged = messy = 0
     by_signal: dict[str, int] = {}
     offenders: list[tuple[str, list[str]]] = []
-    for folder in sorted(set(folders))[:limit]:
+    for folder in coherent_folders(limit):
         try:
             analysis = analyze_dir(folder)
         except Exception:  # noqa: BLE001

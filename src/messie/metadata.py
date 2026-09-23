@@ -57,8 +57,10 @@ _HEAD_BYTES = 4096
 #: Archives can hold thousands of members; a sample says as much as all of them.
 _MAX_MEMBERS = 60
 #: Keep descriptions short. They say what a file is, not what it contains at
-#: length, and they must stay below ``min_text_chars`` so that binaries are
-#: never judged for failing to cohere.
+#: length. An image's description is a handful of words and so stays under
+#: ``min_text_chars``, which is what keeps photo albums out of the coherence
+#: reckoning entirely; an archive with forty distinct member names has said
+#: something substantial about itself and is judged on it like any document.
 _MAX_WORDS = 40
 
 _ARCHIVE_EXTS = frozenset({"zip", "whl", "jar", "egg", "apk", "tar", "tgz"})
@@ -169,18 +171,26 @@ def _describe_font(path: Path) -> str:
 # --- images -----------------------------------------------------------------
 
 
+def _dims(width: int, height: int) -> str:
+    """A size, or "" if the header does not actually state one.
+
+    A zeroed or truncated header parses cleanly into ``0x0``, which is not a
+    description of anything. Saying nothing is the honest answer, and keeps a
+    corrupt image from being grouped with every other corrupt image.
+    """
+    return f"{width}x{height}" if width > 0 and height > 0 else ""
+
+
 def _png_size(data: bytes) -> str:
     if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) < 24:
         return ""
-    width, height = struct.unpack(">II", data[16:24])
-    return f"{width}x{height}"
+    return _dims(*struct.unpack(">II", data[16:24]))
 
 
 def _gif_size(data: bytes) -> str:
     if data[:3] != b"GIF" or len(data) < 10:
         return ""
-    width, height = struct.unpack("<HH", data[6:10])
-    return f"{width}x{height}"
+    return _dims(*struct.unpack("<HH", data[6:10]))
 
 
 def _jpeg_size(data: bytes) -> str:
@@ -194,7 +204,7 @@ def _jpeg_size(data: bytes) -> str:
         marker = data[i + 1]
         if marker in (0xC0, 0xC1, 0xC2, 0xC3):
             height, width = struct.unpack(">HH", data[i + 5 : i + 9])
-            return f"{width}x{height}"
+            return _dims(width, height)
         if marker in (0xD8, 0xD9):
             i += 2
             continue

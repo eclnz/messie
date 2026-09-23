@@ -8,7 +8,8 @@ have ended up living together.
 Everything runs on this machine. No network calls are made during analysis.
 """
 
-from messie.analyze import DirAnalysis, analyze_dir, analyze_tree
+from messie.analyze import analyze_dir, analyze_tree
+from messie.result import DirAnalysis
 from messie.score import Verdict
 from messie.signals import Finding
 

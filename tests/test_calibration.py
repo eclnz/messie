@@ -21,9 +21,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from calibrate import measure_separation, sweep_threshold  # noqa: E402
+from conftest import backend_or_skip  # noqa: E402
 
 from messie.config import DEFAULT_SETTINGS, Thresholds  # noqa: E402
-from messie.embed import BACKEND_ORDER, get_embedder  # noqa: E402
+from messie.embed import BACKEND_ORDER  # noqa: E402
 
 BACKEND = "wordllama"
 
@@ -31,13 +32,6 @@ BACKEND = "wordllama"
 #: that a corpus tweak does not fail the build, narrow enough that a real
 #: mistake does.
 SCALE_TOLERANCE = 0.06
-
-
-def backend_or_skip(name: str):
-    try:
-        return get_embedder(name)
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"{name} unavailable: {exc}")
 
 
 @pytest.fixture(scope="module")

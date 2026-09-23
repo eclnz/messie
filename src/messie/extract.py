@@ -4,9 +4,6 @@ Only ever reads the front of a file. Office formats are handled with the
 standard library alone: .docx/.pptx/.xlsx/.epub are zip archives of XML, so
 there is no need for a third-party parser.
 
-Files with no prose in them are handed to ``messie.metadata``, which reads
-what their container says about them instead.
-
 Every extractor is best-effort. A file that cannot be read yields "" and the
 caller falls back to the filename.
 """
@@ -20,7 +17,6 @@ from pathlib import Path
 
 from messie.config import DEFAULT_SETTINGS, Settings
 from messie.kinds import is_textual
-from messie.metadata import describe
 from messie.scan import FileEntry
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -196,17 +192,14 @@ def _from_legacy_doc(path: Path, limit: int, max_bytes: int) -> str:
 
 
 def extract_text(entry: FileEntry, settings: Settings = DEFAULT_SETTINGS) -> str:
-    """What a file says, or "" if it says nothing.
+    """The prose inside a file, or "" if there is none to be had.
 
-    Documents say it in words. Photographs, music, video, archives and fonts
-    say it in their container metadata — the camera that took it, the album it
-    belongs to, the members inside it — which ``messie.metadata`` turns into a
-    short phrase. Either way the caller gets text and need not care which.
+    Files with no prose in them — photographs, archives, fonts — are not this
+    function's business. ``messie.metadata`` reads what their container says
+    instead, and ``Engine._text_for`` is where the two are combined.
     """
-    if entry.size == 0:
+    if entry.size == 0 or not is_textual(entry.kind):
         return ""
-    if not is_textual(entry.kind):
-        return describe(entry)
 
     ext, path = entry.ext, entry.path
     limit, max_bytes = settings.text_excerpt_chars, settings.max_read_bytes

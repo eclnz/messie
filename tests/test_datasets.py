@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import SEMANTIC_BACKENDS, backend_or_skip, codes, installed
 from corpus import ALL_TOPICS, DEV_TOPICS, EXTENSIONS, OFFICE_TOPICS, PERSONAL_TOPICS, TOPICS
 from corpus.build import (
     add_debris,
@@ -26,10 +27,7 @@ from corpus.build import (
 from corpus.synth import write_file
 
 from messie.analyze import analyze_dir
-from messie.embed import get_embedder
 from messie.score import Verdict
-
-BACKENDS = SEMANTIC_BACKENDS = ["wordllama", "model2vec", "sentence"]
 
 #: Subjects that do not hold together even for a semantic backend, and why.
 #: Measured against the example corpus: 34 of 35 topics form a single group.
@@ -38,27 +36,7 @@ KNOWN_WEAK = {
 }
 
 
-def backend_or_skip(name):
-    try:
-        return get_embedder(name)
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"{name} unavailable: {exc}")
-
-
-def _installed(names: list[str]) -> list[str]:
-    """Resolved once at collection, so absent backends do not litter the run
-    with hundreds of skipped parametrisations."""
-    out = []
-    for name in names:
-        try:
-            get_embedder(name)
-        except Exception:  # noqa: BLE001
-            continue
-        out.append(name)
-    return out
-
-
-INSTALLED_SEMANTIC = _installed(SEMANTIC_BACKENDS)
+INSTALLED_SEMANTIC = installed(SEMANTIC_BACKENDS)
 _NO_SEMANTIC = [pytest.param(None, marks=pytest.mark.skip(reason="no semantic backend"))]
 
 
@@ -72,10 +50,6 @@ def real_embedder(request):
 def semantic_embedder(request):
     """Only the backends that compare meaning rather than vocabulary."""
     return backend_or_skip(request.param)
-
-
-def codes(analysis) -> set[str]:
-    return {f.code for f in analysis.findings}
 
 
 # --- the corpora themselves -------------------------------------------------

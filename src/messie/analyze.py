@@ -1,306 +1,24 @@
-"""Putting it together: read a folder, work out what is in it, judge it.
+"""Walking a tree and judging every folder in it.
 
-A file's vector blends three things, in descending order of trust:
-
-  what it says   the text actually inside it
-  what it is called  the words in its filename
-  what it is     a stand-in phrase for its kind
-
-A photo named ``IMG_4412.HEIC`` has only the third, so it lands with the other
-photos rather than looking like a stray. Files in that position are marked
-untopical and excluded from signals that would otherwise punish them for being
-unreadable.
+The judging itself lives in :mod:`messie.engine`; what is here is the
+traversal, and the bookkeeping that lets a folder be compared against the
+folders below it without reading anything twice.
 """
 
 from __future__ import annotations
 
-import re
-from collections import Counter
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
 
 import numpy as np
 
 from messie.cache import Cache
-from messie.cluster import Clustering, cluster_vectors
-from messie.config import DEFAULT_SETTINGS, Settings, Thresholds
-from messie.embed import Embedder, get_embedder, normalise
-from messie.extract import extract_text
-from messie.kinds import is_textual, kind_phrase
-from messie.label import file_terms, format_label, label_clusters
-from messie.scan import DirContents, FileEntry, read_dir, walk
-from messie.score import Verdict, score_findings
-from messie.signals import Finding, failed_signals, run_all
-from messie.tokens import name_tokens
+from messie.config import DEFAULT_SETTINGS, Settings
+from messie.embed import Embedder
+from messie.engine import Engine
+from messie.result import DirAnalysis, VectorRecord
+from messie.scan import read_dir, walk
 
-# How much the text / name / kind vectors count, by how much we could read.
-_MIX_RICH = (0.75, 0.20, 0.05)
-_MIX_THIN = (0.45, 0.40, 0.15)
-_MIX_NAME = (0.00, 0.80, 0.20)
-_MIX_KIND = (0.00, 0.00, 1.00)
-
-# A binary described by its own metadata is short but factual, so it is trusted
-# like rich text rather than like a thin scrap of prose, and the kind phrase is
-# dropped outright. It has become redundant: "photograph taken with a camera
-# Canon EOS R6" already says what the file is, and adding "photograph picture
-# image snapshot" on top only restates the one thing every image in the folder
-# has in common. That shared restatement is not free. A folder of scans,
-# photographs and screenshots sits 0.138 apart on its text alone; carrying the
-# kind phrase at the usual weight dragged it to 0.254, and even a residual 0.05
-# held it at 0.226 — both the wrong side of the 0.220 line at which two groups
-# stop reading as unrelated. At zero it lands at 0.200 and the folder is
-# reported, while a single camera roll stays one group, as it should.
-_MIX_META = (0.85, 0.15, 0.00)
-
-#: An alphabetic run this long makes a description *words* rather than
-#: measurements. "4032x3024" names no subject; "scanned paper document"
-#: does, and only the second is worth trusting over everything else.
-_WORDS_RE = re.compile(r"[^\W\d_]{3,}")
-
-class VectorRecord(NamedTuple):
-    """What vectorize() hands back for one folder."""
-
-    texts: list[str]
-    vectors: np.ndarray
-    topical: np.ndarray
-    terms: list[Counter]
-
-
-@dataclass
-class DirAnalysis:
-    """Everything known about one folder, plus the verdict."""
-
-    path: Path
-    settings: Settings
-    thresholds: Thresholds
-    backend: str
-    files: list[FileEntry] = field(default_factory=list)
-    texts: list[str] = field(default_factory=list)
-    terms: list[Counter] = field(default_factory=list)
-    vectors: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), np.float32))
-    topical: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
-    clustering: Clustering | None = None
-    cluster_labels: dict[int, list[str]] = field(default_factory=dict)
-    child_profiles: dict[Path, np.ndarray] = field(default_factory=dict)
-    subdirs: list[Path] = field(default_factory=list)
-    truncated: int = 0
-    judged: bool = True
-    skip_reason: str = ""
-    findings: list[Finding] = field(default_factory=list)
-    #: Signals that raised while judging this folder. A crashed signal and a
-    #: quiet one look identical from the outside, so this is carried out to the
-    #: report rather than left in a module-level global.
-    failed_signals: list[str] = field(default_factory=list)
-    score: float = 0.0
-    verdict: Verdict = Verdict.TIDY
-
-    # --- conveniences used by the signals ----------------------------------
-
-    @property
-    def n_files(self) -> int:
-        return len(self.files)
-
-    def meaningful_clusters(self) -> list[int]:
-        """Clusters big enough for their presence to mean something."""
-        if not self.clustering or self.n_files == 0:
-            return []
-        floor = max(
-            self.settings.meaningful_cluster_min,
-            int(self.settings.meaningful_cluster_frac * self.n_files),
-        )
-        sizes = self.clustering.sizes()
-        return [cid for cid, size in sizes.items() if size >= floor]
-
-    def members(self, cid: int) -> list[int]:
-        if not self.clustering:
-            return []
-        return self.clustering.members(cid).tolist()
-
-    def label_of(self, cid: int) -> str:
-        return format_label(self.cluster_labels.get(cid, []))
-
-    def names(self, indices: list[int], limit: int = 3) -> list[str]:
-        return [self.files[i].name for i in indices[:limit]]
-
-    def mtime_span(self, indices: list[int]) -> tuple[float, float]:
-        if not indices:
-            return (0.0, 0.0)
-        times = [self.files[i].mtime for i in indices]
-        return (min(times), max(times))
-
-
-class Engine:
-    """Holds the embedder and cache so a whole tree is analysed with one of each."""
-
-    def __init__(
-        self,
-        settings: Settings = DEFAULT_SETTINGS,
-        embedder: Embedder | None = None,
-        cache: Cache | None = None,
-    ) -> None:
-        self.settings = settings
-        self.embedder = embedder or get_embedder()
-        self.thresholds = Thresholds.derive(
-            getattr(self.embedder, "scale", 0.3),
-            settings,
-            settings.cluster_threshold_override,
-        )
-        # The cache holds extracted text, which is the expensive part: reading
-        # and decompressing files off disk. Vectors are not cached; embedding is
-        # cheap next to the disk read.
-        self.cache = cache if cache is not None else Cache(enabled=False)
-
-    # --- text ---------------------------------------------------------------
-
-    def _text_for(self, entry: FileEntry) -> str:
-        key = Cache.key("text", entry.path, entry.size, entry.mtime)
-        hit = self.cache.get(key)
-        if hit is not None:
-            return hit[1]
-        text = extract_text(entry, self.settings)
-        self.cache.put(key, np.zeros(1, np.float32), text)
-        return text
-
-    # --- vectors ------------------------------------------------------------
-
-    #: A filename word shared by at least this share of the folder is a naming
-    #: convention, not a subject.
-    _COMMON_NAME_SHARE = 0.7
-
-    def _name_phrases(self, files: list[FileEntry]) -> list[str]:
-        """Filenames as phrases, with folder-wide boilerplate removed.
-
-        People prefix filenames with project names, initials and dates. A word
-        in nearly every name here says nothing about which files belong with
-        which, and leaving it in raises every pairwise similarity at once —
-        enough to weld genuinely separate subjects into one group.
-        """
-        token_lists = [name_tokens(f.stem) for f in files]
-        common: set[str] = set()
-        if len(files) >= 5:
-            frequency: Counter[str] = Counter()
-            for tokens in token_lists:
-                frequency.update(set(tokens))
-            cutoff = self._COMMON_NAME_SHARE * len(files)
-            common = {token for token, count in frequency.items() if count >= cutoff}
-        return [" ".join(t for t in tokens if t not in common) for tokens in token_lists]
-
-    def vectorize(
-        self, files: list[FileEntry]
-    ) -> VectorRecord:
-        """Return (texts, unit vectors, topical mask, per-file terms)."""
-        texts = [self._text_for(f) for f in files]
-        names = self._name_phrases(files)
-        kinds = [kind_phrase(f.kind) for f in files]
-
-        text_vecs = self.embedder.encode(texts)
-        name_vecs = self.embedder.encode(names)
-        kind_vecs = self.embedder.encode(kinds)
-
-        dim = text_vecs.shape[1]
-        out = np.zeros((len(files), dim), dtype=np.float32)
-        topical = np.zeros(len(files), dtype=bool)
-
-        for i, (text, name) in enumerate(zip(texts, names, strict=True)):
-            entry = files[i]
-            if entry.kind == "junk" or entry.size == 0:
-                # Debris has no subject. Leaving it at zero keeps it out of every
-                # topic group, so a folder's themes are not padded with leftovers.
-                continue
-
-            has_text = bool(text.strip())
-            rich = len(text) >= self.settings.min_text_chars
-            has_name = bool(name.strip())
-            # Anything not made of prose was described by its own container
-            # rather than read: a font's name table, an archive's members, a
-            # photograph's EXIF.
-            # Only if it says something in words. A folder where some images
-            # carry metadata and others do not would otherwise split into
-            # "has dimensions" and "has none", which is no kind of subject.
-            from_metadata = (
-                has_text
-                and not is_textual(entry.kind)
-                and _WORDS_RE.search(text) is not None
-            )
-
-            if from_metadata:
-                mix = _MIX_META
-            elif has_text and rich:
-                mix = _MIX_RICH
-            elif has_text:
-                mix = _MIX_THIN
-            elif has_name:
-                mix = _MIX_NAME
-            else:
-                mix = _MIX_KIND
-
-            out[i] = mix[0] * text_vecs[i] + mix[1] * name_vecs[i] + mix[2] * kind_vecs[i]
-            topical[i] = has_text or has_name
-
-        terms = [file_terms(f.stem, t) for f, t in zip(files, texts, strict=True)]
-        return VectorRecord(texts, normalise(out), topical, terms)
-
-    @staticmethod
-    def profile_of(vectors: np.ndarray) -> np.ndarray:
-        """A folder's contents as one vector.
-
-        This is the *mean* member vector, not a normalised centroid, so that
-        dotting a file against it gives that file's average similarity to the
-        folder — the same scale every other threshold is measured on.
-        """
-        if vectors.size == 0:
-            return np.zeros(0, dtype=np.float32)
-        return vectors.mean(axis=0).astype(np.float32)
-
-    def profile(self, files: list[FileEntry]) -> np.ndarray:
-        if not files:
-            return np.zeros(0, dtype=np.float32)
-        return self.profile_of(self.vectorize(files)[1])
-
-    # --- analysis -----------------------------------------------------------
-
-    def analyze(
-        self,
-        contents: DirContents,
-        child_profiles: dict[Path, np.ndarray] | None = None,
-        precomputed: VectorRecord | None = None,
-    ) -> DirAnalysis:
-        """Judge one folder. ``precomputed`` reuses vectors built earlier, so a
-        tree walk does not embed every folder twice."""
-        analysis = DirAnalysis(
-            path=contents.path,
-            settings=self.settings,
-            thresholds=self.thresholds,
-            backend=self.embedder.name,
-            files=list(contents.files),
-            subdirs=list(contents.subdirs),
-            truncated=contents.truncated,
-            child_profiles=child_profiles or {},
-        )
-
-        if len(contents.files) < self.settings.min_files_to_judge:
-            analysis.judged = False
-            analysis.skip_reason = (
-                f"only {len(contents.files)} files — too few to call it anything"
-            )
-            return analysis
-
-        record = precomputed or self.vectorize(contents.files)
-        texts, vectors, topical, terms = record
-        analysis.texts = texts
-        analysis.vectors = vectors
-        analysis.topical = topical
-        analysis.terms = terms
-        analysis.clustering = cluster_vectors(vectors, self.thresholds.cluster)
-        analysis.cluster_labels = label_clusters(
-            analysis.clustering.labels, terms, analysis.clustering.n_clusters
-        )
-
-        analysis.findings = run_all(analysis)
-        analysis.failed_signals = list(failed_signals)
-        analysis.score, analysis.verdict = score_findings(analysis.findings, self.settings)
-        return analysis
+__all__ = ["DirAnalysis", "Engine", "VectorRecord", "analyze_dir", "analyze_tree"]
 
 
 def analyze_dir(
@@ -347,7 +65,7 @@ def analyze_tree(
             continue
         key = contents.path.resolve()
         records[key] = engine.vectorize(contents.files)
-        profiles[key] = engine.profile_of(records[key][1])
+        profiles[key] = engine.profile_of(records[key].vectors)
 
     results: list[DirAnalysis] = []
     for contents in all_contents:
