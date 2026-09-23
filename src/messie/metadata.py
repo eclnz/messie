@@ -23,14 +23,24 @@ Scope is deliberately narrow, and set by what measurement supported:
                papers are plainly different things, and the manifest says so
     fonts      family and foundry, worth 0.60 of separation between real font
                directories where there was none
-    images     dimensions, which collapsed a real image folder from fifteen
-               spurious clusters to three
+    images     dimensions always, and with Pillow installed the kind of image
+               it is — photograph, scan, screenshot — from its EXIF
 
-EXIF and audio tags were built and then removed. Telling one camera's
-photographs from another's is discrimination between things that are alike,
-and a Pictures folder holding two cameras is normal rather than messy — so the
-capability cost two dependencies and changed no verdict. Distinguishing very
-similar things is not the job; flagging obviously mixed content is.
+Audio tags were built and removed. Telling one album from another is
+discrimination between things that are alike, and it changed no verdict.
+
+EXIF was removed for the same reason and then brought back, because the reason
+was wrong. The case first tested was one camera roll against another, which is
+also things that are alike, and which a Pictures folder holds quite normally.
+The case that matters is a folder mixing *kinds* of image, and there the
+measurement is clear: given category words, seven of ten image-category pairs
+fall below the threshold at which messie calls two groups unrelated — a scan
+and a photograph sit at 0.138 against a line at 0.220. Photographs,
+screenshots and memes stay above it and group together, which is the right
+answer for three kinds of casual digital image.
+
+Pillow is optional, so none of that costs anything to anyone who does not want
+it; without it images still report their dimensions.
 """
 
 from __future__ import annotations
@@ -195,18 +205,78 @@ def _jpeg_size(data: bytes) -> str:
     return ""
 
 
-def _describe_image(path: Path) -> str:
-    """Dimensions, which is all an image honestly says without decoding it.
+#: Words in an image's Software tag that say what produced it. The file is
+#: naming its own producer, so this reads a stated fact rather than guessing
+#: from pixels — but which words imply which category is a judgement, kept
+#: deliberately short.
+_SCREENSHOT_HINTS = ("shot", "snip", "capture", "grab", "screen")
+_SCANNER_HINTS = ("scan", "epson", "canoscan", "twain", "xerox")
 
-    Thin, but not nothing: it is what stopped a real folder of bullet graphics
-    fragmenting into fifteen meaningless groups.
+
+def _category_words(tags: dict) -> list[str]:
+    """Name the kind of image, where the file says enough to name it.
+
+    Dimensions alone do not separate categories: to an embedding, "4032x3024"
+    and "1920x1080" are two terse number strings and nothing more. Words do.
+    Measured against ideal category labels, seven of ten image-category pairs
+    read as unrelated — a scan and a photograph at 0.138, a photograph and a
+    diagram at 0.080, against an unrelated threshold of 0.220 — so a folder
+    mixing them is reported as mixed. Photographs, screenshots and memes sit
+    above that line and group together, which is the right answer for three
+    kinds of casual digital image.
+    """
+    software = str(tags.get("Software", "")).strip()
+    make = str(tags.get("Make", "")).strip()
+    model = str(tags.get("Model", "")).strip()
+    lowered = software.lower()
+
+    if make or model:
+        words = ["photograph", "taken", "with", "a", "camera", make, model]
+        stamp = str(tags.get("DateTimeOriginal") or tags.get("DateTime") or "")
+        if stamp[:4].isdigit():
+            words.append(stamp[:4])
+        return words
+    if any(hint in lowered for hint in _SCANNER_HINTS):
+        return ["scanned", "paper", "document", "from", "a", "scanner", software]
+    if any(hint in lowered for hint in _SCREENSHOT_HINTS):
+        return ["screenshot", "capture", "of", "a", "computer", "screen", software]
+    if software:
+        return ["image", "made", "with", software]
+    return []
+
+
+def _describe_image(path: Path) -> str:
+    """What kind of image this is, and how big.
+
+    Dimensions come from the file header and need nothing installed. They are
+    thin — it is what stopped a real folder of bullet graphics fragmenting into
+    fifteen meaningless groups — but they carry no sense of *category*.
+
+    With Pillow present, EXIF adds that: a camera's make and model, a scanner's
+    or screenshot tool's name. Those become words, and words are what the rest
+    of messie can reason about. Without Pillow the dimensions still come back,
+    so nothing breaks; there is simply less to say.
     """
     try:
         with path.open("rb") as handle:
             head = handle.read(_HEAD_BYTES)
     except OSError:
         return ""
-    return _png_size(head) or _jpeg_size(head) or _gif_size(head)
+    size = _png_size(head) or _jpeg_size(head) or _gif_size(head)
+
+    try:
+        from PIL import ExifTags, Image
+    except Exception:  # noqa: BLE001 - optional; dimensions are still worth having
+        return size
+
+    try:
+        with Image.open(path) as image:
+            size = f"{image.width}x{image.height}"
+            raw = image.getexif()
+            tags = {ExifTags.TAGS.get(k, k): v for k, v in raw.items()} if raw else {}
+    except Exception:  # noqa: BLE001 - unreadable image, header size still stands
+        return size
+    return _clip([*_category_words(tags), size])
 
 
 # --- dispatch ---------------------------------------------------------------

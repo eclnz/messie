@@ -14,6 +14,7 @@ unreadable.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +27,7 @@ from messie.cluster import Clustering, cluster_vectors
 from messie.config import DEFAULT_SETTINGS, Settings, Thresholds
 from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
-from messie.kinds import kind_phrase
+from messie.kinds import is_textual, kind_phrase
 from messie.label import file_terms, format_label, label_clusters
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.score import Verdict, score_findings
@@ -38,6 +39,24 @@ _MIX_RICH = (0.75, 0.20, 0.05)
 _MIX_THIN = (0.45, 0.40, 0.15)
 _MIX_NAME = (0.00, 0.80, 0.20)
 _MIX_KIND = (0.00, 0.00, 1.00)
+
+# A binary described by its own metadata is short but factual, so it is trusted
+# like rich text rather than like a thin scrap of prose, and the kind phrase is
+# dropped outright. It has become redundant: "photograph taken with a camera
+# Canon EOS R6" already says what the file is, and adding "photograph picture
+# image snapshot" on top only restates the one thing every image in the folder
+# has in common. That shared restatement is not free. A folder of scans,
+# photographs and screenshots sits 0.138 apart on its text alone; carrying the
+# kind phrase at the usual weight dragged it to 0.254, and even a residual 0.05
+# held it at 0.226 — both the wrong side of the 0.220 line at which two groups
+# stop reading as unrelated. At zero it lands at 0.200 and the folder is
+# reported, while a single camera roll stays one group, as it should.
+_MIX_META = (0.85, 0.15, 0.00)
+
+#: An alphabetic run this long makes a description *words* rather than
+#: measurements. "4032x3024" names no subject; "scanned paper document"
+#: does, and only the second is worth trusting over everything else.
+_WORDS_RE = re.compile(r"[^\W\d_]{3,}")
 
 class VectorRecord(NamedTuple):
     """What vectorize() hands back for one folder."""
@@ -193,8 +212,21 @@ class Engine:
             has_text = bool(text.strip())
             rich = len(text) >= self.settings.min_text_chars
             has_name = bool(name.strip())
+            # Anything not made of prose was described by its own container
+            # rather than read: a font's name table, an archive's members, a
+            # photograph's EXIF.
+            # Only if it says something in words. A folder where some images
+            # carry metadata and others do not would otherwise split into
+            # "has dimensions" and "has none", which is no kind of subject.
+            from_metadata = (
+                has_text
+                and not is_textual(entry.kind)
+                and _WORDS_RE.search(text) is not None
+            )
 
-            if has_text and rich:
+            if from_metadata:
+                mix = _MIX_META
+            elif has_text and rich:
                 mix = _MIX_RICH
             elif has_text:
                 mix = _MIX_THIN

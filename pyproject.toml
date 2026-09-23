@@ -17,9 +17,13 @@ dependencies = ["numpy>=1.24", "wordllama>=0.4"]
 # Alternative backends. Both fetch a model once on first use; neither is
 # needed, since the default backend ships with the package.
 model2vec = ["model2vec>=0.3"]
+# Reads EXIF, so photographs, scans and screenshots name themselves rather
+# than being three sets of numbers. Images still report their dimensions
+# without it.
+photos = ["pillow>=10.0"]
 st = ["sentence-transformers>=2.2"]
 pdf = ["pypdf>=4.0"]
-all = ["pypdf>=4.0", "model2vec>=0.3"]
+all = ["pypdf>=4.0", "model2vec>=0.3", "pillow>=10.0"]
 dev = ["pytest>=7.4", "ruff>=0.4", "pypdf>=4.0"]
 
 [project.scripts]

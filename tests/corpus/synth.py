@@ -272,6 +272,10 @@ def write_image(path: Path, size: int = 24_000, seed: str = "img") -> Path:
     else:  # jpeg family and raw formats all lead with the JFIF marker
         head = b"\xff\xd8\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01\x00"
         head += b"\x00\x01\x00\x01\x00\x00"
+        # A frame header, so the stub reports dimensions the way a real
+        # photograph does rather than refusing to say how big it is.
+        head += b"\xff\xc0" + struct.pack(">HBHHB", 11, 8, 3024, 4032, 1)
+        head += b"\x01\x11\x00"
         tail = b"\xff\xd9"
     body = _filler(seed + path.name, max(0, size - len(head) - len(tail)))
     _prepare(path).write_bytes(head + body + tail)
