@@ -13,11 +13,22 @@ import re
 # Split lower->upper ("taxReturn"), and the tail of an acronym run, but only
 # where a real lowercase word follows: "XMLParser" splits, "FINALv2" must not
 # become "FINA"+"Lv2".
+#
+# This one stays ASCII. Python's re has no \p{Lu}, so matching accented capitals
+# would mean a third-party regex engine, and a capital in the middle of a word
+# is rare enough that it is not worth the dependency. "Crème Brûlée" splits on
+# its space like any other name; only "crèmeBrûlée" would be missed.
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2,})")
-_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
+
+# Split on anything that is not a letter or digit *in any script*. An ASCII
+# class here would treat every accented letter as a separator and quietly
+# shred the word around it: "Déclaration" became "claration", "réunion" became
+# "union", "café" became "caf". Underscore is a word character to \w, so it has
+# to be listed as a separator explicitly.
+_SPLIT_RE = re.compile(r"[\W_]+", re.UNICODE)
 _DIGITS_RE = re.compile(r"^\d+$")
 _HEXISH_RE = re.compile(r"^[0-9a-f]{8,}$", re.IGNORECASE)
-_VERSIONED_RE = re.compile(r"([a-z]+?)v?(\d+)")
+_VERSIONED_RE = re.compile(r"([^\W\d_]+?)v?(\d+)", re.UNICODE)
 _VNUM_RE = re.compile(r"v\d+")
 
 #: Words meaning "another go at the same thing". Their presence in a name is

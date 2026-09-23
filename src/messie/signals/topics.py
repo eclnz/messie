@@ -7,6 +7,7 @@ of a novel, it is a mess, and only the content says so.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -24,6 +25,31 @@ _TOPIC_DECAY = 0.45
 
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _dominant_subject(analysis: DirAnalysis) -> np.ndarray | None:
+    """The mean vector of this folder's largest meaningful cluster.
+
+    What the folder is mostly *about*, as distinct from the average of
+    everything in it — which includes whatever does not belong.
+    """
+    clustering = analysis.clustering
+    meaningful = analysis.meaningful_clusters()
+    if clustering is None or not meaningful:
+        return None
+    biggest = max(meaningful, key=lambda cid: clustering.sizes().get(cid, 0))
+    members = clustering.members(biggest)
+    if members.size == 0:
+        return None
+    return analysis.vectors[members].mean(axis=0)
+
+
+def _relative(folder: Path, analysis: DirAnalysis) -> str:
+    """A subfolder named the way a person would say it: Archive/2023/Taxes."""
+    try:
+        return str(folder.resolve().relative_to(analysis.path.resolve()))
+    except ValueError:
+        return folder.name
 
 
 def _unrelated_set(analysis: DirAnalysis, candidates: list[int]) -> list[int]:
@@ -105,13 +131,36 @@ def unrelated_topics(analysis: DirAnalysis) -> list[Finding]:
     ]
 
 
-def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
-    """Share of readable files belonging to no group worth the name.
+#: Above this share of unattached files, the folder has no subject at all and
+#: the wording changes from "some files do not belong" to "nothing belongs".
+_NO_THREAD_SHARE = 0.65
 
-    Returns the fraction and the indices of the files we could actually read.
+
+def _judgeable(analysis: DirAnalysis) -> np.ndarray:
+    """Files with enough content to say whether they belong with anything.
+
+    A photo we cannot open and a one-line note are uninformative, not
+    unrelated. Counting either as evidence of incoherence would flag every
+    photo album and every folder of jotted notes, so both are left out of this
+    reckoning entirely.
+    """
+    floor = analysis.settings.min_text_chars
+    return np.array(
+        [
+            bool(analysis.topical[i]) and len(analysis.texts[i]) >= floor
+            for i in range(analysis.n_files)
+        ],
+        dtype=bool,
+    )
+
+
+def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
+    """Share of judgeable files belonging to no group worth the name.
+
+    Returns the fraction and the indices of the files we could actually judge.
     """
     clustering = analysis.clustering
-    eligible = np.flatnonzero(analysis.topical)
+    eligible = np.flatnonzero(_judgeable(analysis)) if analysis.n_files else np.zeros(0, int)
     if clustering is None or eligible.size == 0:
         return 0.0, eligible
     meaningful = set(analysis.meaningful_clusters())
@@ -120,92 +169,66 @@ def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
 
 
 @signal
-def no_common_thread(analysis: DirAnalysis) -> list[Finding]:
-    """A folder with no organising subject at all.
+def unattached_files(analysis: DirAnalysis) -> list[Finding]:
+    """Files belonging to no group here — a few of them, or all of them.
 
-    This is the case the clustering signal cannot see. ``unrelated_topics``
-    needs groups to compare, and a folder where every single file is about
-    something different has none — so at the point the mess is total, the
-    flagship signal goes quiet. Saying so has to be done by counting the
-    absence of structure rather than by finding it.
-    """
-    clustering = analysis.clustering
-    if clustering is None:
-        return []
+    This is what ``unrelated_topics`` cannot see. That signal needs groups to
+    compare, and a folder where every file is about something different has
+    none, so at the point the mess is total the flagship signal goes quiet.
+    Saying so means counting the absence of structure rather than finding it.
 
-    loose, eligible = _loose_fraction(analysis)
-    if eligible.size < analysis.settings.min_files_to_judge:
-        return []
-
-    severity = ramp(loose, 0.5, 0.95)
-    if severity <= 0:
-        return []
-
-    subjects = len({int(clustering.labels[i]) for i in eligible if clustering.labels[i] >= 0})
-    loners = [int(i) for i in eligible if int(clustering.labels[i]) not in
-              set(analysis.meaningful_clusters())]
-
-    return [
-        Finding(
-            code="no_common_thread",
-            severity=severity,
-            headline="Nothing in this folder goes with anything else.",
-            detail=(
-                f"{eligible.size} readable files and {subjects} different subjects "
-                f"between them — there is no thread running through this folder."
-            ),
-            examples=analysis.names(loners, limit=4),
-            data={
-                "readable": int(eligible.size),
-                "subjects": subjects,
-                "loose_fraction": round(loose, 3),
-            },
-        )
-    ]
-
-
-@signal
-def strays(analysis: DirAnalysis) -> list[Finding]:
-    """Files that match nothing else here.
-
-    Only files we could actually read are eligible: a photo we cannot open is
-    uninformative, not unrelated, and holding that against the folder would
-    flag every photo album ever made.
+    "A few files do not belong" and "nothing here belongs to anything" are the
+    same observation at two intensities, so they share one measure and one
+    continuous severity, and only the wording changes. Splitting them into two
+    signals — as this once was — put a cliff at the handoff: just below it one
+    signal reported strongly, just above it the other had ramped up from zero,
+    and at the boundary exactly, neither spoke at all.
     """
     clustering = analysis.clustering
     if clustering is None or analysis.n_files < 2:
         return []
 
     loose, eligible = _loose_fraction(analysis)
-    if eligible.size < 4:
-        return []
-    if loose >= 0.5:
-        # Nearly everything here stands alone, which is not "a few files do not
-        # belong" but "there is nothing to belong to". no_common_thread says
-        # that better, and counting it twice would inflate the score.
+    if eligible.size < max(4, analysis.settings.min_files_to_judge):
         return []
 
-    floor = analysis.thresholds.stray
-    loners = [int(i) for i in eligible if clustering.best_other[i] < floor]
-    if len(loners) < 3:
-        return []
-
-    fraction = len(loners) / int(eligible.size)
-    severity = ramp(fraction, 0.15, 0.55)
+    severity = ramp(loose, 0.20, 0.95)
     if severity <= 0:
         return []
 
+    meaningful = set(analysis.meaningful_clusters())
+    loners = [int(i) for i in eligible if int(clustering.labels[i]) not in meaningful]
+    if len(loners) < 3:
+        return []
     loners.sort(key=lambda i: clustering.best_other[i])
+
+    subjects = len({int(clustering.labels[i]) for i in eligible if clustering.labels[i] >= 0})
+    total_thread = loose >= _NO_THREAD_SHARE
+
+    if total_thread:
+        code = "no_common_thread"
+        headline = "Nothing in this folder goes with anything else."
+        detail = (
+            f"{eligible.size} readable files and {subjects} different subjects "
+            f"between them — there is no thread running through this folder."
+        )
+    else:
+        code = "strays"
+        headline = f"{len(loners)} files match nothing else here."
+        detail = f"{loose:.0%} of the readable files in this folder stand alone."
+
     return [
         Finding(
-            code="strays",
+            code=code,
             severity=severity,
-            headline=f"{len(loners)} files match nothing else here.",
-            detail=f"{fraction:.0%} of the readable files in this folder stand alone.",
+            headline=headline,
+            detail=detail,
             examples=analysis.names(loners, limit=4),
             data={
                 "count": len(loners),
-                "fraction": round(fraction, 3),
+                "readable": int(eligible.size),
+                "subjects": subjects,
+                "loose_fraction": round(loose, 3),
                 "files": [analysis.files[i].name for i in loners[:20]],
             },
         )
@@ -214,7 +237,11 @@ def strays(analysis: DirAnalysis) -> list[Finding]:
 
 @signal
 def misfiled_neighbours(analysis: DirAnalysis) -> list[Finding]:
-    """Loose files that read like the contents of a subfolder sitting right there.
+    """Loose files that read like the contents of a folder somewhere below.
+
+    Not only the immediate children: people file things away several levels
+    down, and loose paperwork upstairs resembles ./Archive/2023/Taxes just as
+    much for that folder being deep.
 
     Reported as an observation. Where they ought to go is not messie's call.
     """
@@ -234,6 +261,25 @@ def misfiled_neighbours(analysis: DirAnalysis) -> list[Finding]:
     if profiles.shape[1] != vectors.shape[1]:
         return []
 
+    # Only a subfolder that is about something *else* can have things misfiled
+    # into it. Where a subfolder holds the same subject as the folder above — a
+    # package and its own subpackages — every loose file resembles it and
+    # saying so is vacuous. This was the single largest source of false
+    # positives on real directories: all eight coherent folders flagged were
+    # packages resembling their own insides.
+    #
+    # The comparison is against this folder's *main* subject, not against the
+    # mean of everything in it. The mean includes the very files under
+    # suspicion, so a genuinely misfiled pile drags the mean towards the
+    # subfolder and hides itself.
+    main = _dominant_subject(analysis)
+    if main is not None:
+        distinct = np.array([float(p @ main) < analysis.thresholds.unrelated for p in profiles])
+        if not distinct.any():
+            return []
+        subdirs = [d for d, keep in zip(subdirs, distinct, strict=True) if keep]
+        profiles = profiles[distinct]
+
     scores = vectors @ profiles.T          # (n_files, n_subdirs)
     own = vectors @ own_mean               # (n_files,)
 
@@ -244,7 +290,9 @@ def misfiled_neighbours(analysis: DirAnalysis) -> list[Finding]:
             continue
         best = int(np.argmax(scores[i]))
         if scores[i, best] >= threshold and scores[i, best] > own[i] + margin:
-            hits.setdefault(subdirs[best].name, []).append(analysis.files[i].name)
+            hits.setdefault(_relative(subdirs[best], analysis), []).append(
+                analysis.files[i].name
+            )
             total += 1
 
     hits = {k: v for k, v in hits.items() if len(v) >= 2}
@@ -263,7 +311,7 @@ def misfiled_neighbours(analysis: DirAnalysis) -> list[Finding]:
             severity=severity,
             headline=(
                 f"{total} loose files read like the contents of "
-                f"{'a subfolder' if len(hits) == 1 else 'subfolders'} right here."
+                f"{'a folder' if len(hits) == 1 else 'folders'} further down."
             ),
             detail=f"{len(biggest[1])} of them resemble ./{biggest[0]}.",
             examples=biggest[1][:3],

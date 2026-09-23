@@ -28,10 +28,9 @@ from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
 from messie.kinds import kind_phrase
 from messie.label import file_terms, format_label, label_clusters
-from messie.legibility import Legibility, assess
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.score import Verdict, score_findings
-from messie.signals import Finding, run_all
+from messie.signals import Finding, failed_signals, run_all
 from messie.tokens import name_tokens
 
 # How much the text / name / kind vectors count, by how much we could read.
@@ -47,7 +46,6 @@ class VectorRecord(NamedTuple):
     vectors: np.ndarray
     topical: np.ndarray
     terms: list[Counter]
-    legibility: list[Legibility]
 
 
 @dataclass
@@ -61,7 +59,6 @@ class DirAnalysis:
     files: list[FileEntry] = field(default_factory=list)
     texts: list[str] = field(default_factory=list)
     terms: list[Counter] = field(default_factory=list)
-    legibility: list[Legibility] = field(default_factory=list)
     vectors: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), np.float32))
     topical: np.ndarray = field(default_factory=lambda: np.zeros(0, bool))
     clustering: Clustering | None = None
@@ -72,6 +69,10 @@ class DirAnalysis:
     judged: bool = True
     skip_reason: str = ""
     findings: list[Finding] = field(default_factory=list)
+    #: Signals that raised while judging this folder. A crashed signal and a
+    #: quiet one look identical from the outside, so this is carried out to the
+    #: report rather than left in a module-level global.
+    failed_signals: list[str] = field(default_factory=list)
     score: float = 0.0
     verdict: Verdict = Verdict.TIDY
 
@@ -173,10 +174,6 @@ class Engine:
         texts = [self._text_for(f) for f in files]
         names = self._name_phrases(files)
         kinds = [kind_phrase(f.kind) for f in files]
-        floor = self.settings.legibility_floor
-        legible = [
-            assess(t, f.kind, f.ext, floor) for f, t in zip(files, texts, strict=True)
-        ]
 
         text_vecs = self.embedder.encode(texts)
         name_vecs = self.embedder.encode(names)
@@ -191,12 +188,6 @@ class Engine:
             if entry.kind == "junk" or entry.size == 0:
                 # Debris has no subject. Leaving it at zero keeps it out of every
                 # topic group, so a folder's themes are not padded with leftovers.
-                continue
-            if legible[i].garbled:
-                # Garbled text has no subject either, and its vector is noise.
-                # Left in, a few corrupt files would cheerfully cluster together
-                # and be reported as a topic. They are counted by their own
-                # signal instead.
                 continue
 
             has_text = bool(text.strip())
@@ -216,7 +207,7 @@ class Engine:
             topical[i] = has_text or has_name
 
         terms = [file_terms(f.stem, t) for f, t in zip(files, texts, strict=True)]
-        return VectorRecord(texts, normalise(out), topical, terms, legible)
+        return VectorRecord(texts, normalise(out), topical, terms)
 
     @staticmethod
     def profile_of(vectors: np.ndarray) -> np.ndarray:
@@ -264,18 +255,18 @@ class Engine:
             return analysis
 
         record = precomputed or self.vectorize(contents.files)
-        texts, vectors, topical, terms = record[:4]
+        texts, vectors, topical, terms = record
         analysis.texts = texts
         analysis.vectors = vectors
         analysis.topical = topical
         analysis.terms = terms
-        analysis.legibility = record.legibility
         analysis.clustering = cluster_vectors(vectors, self.thresholds.cluster)
         analysis.cluster_labels = label_clusters(
             analysis.clustering.labels, terms, analysis.clustering.n_clusters
         )
 
         analysis.findings = run_all(analysis)
+        analysis.failed_signals = list(failed_signals)
         analysis.score, analysis.verdict = score_findings(analysis.findings, self.settings)
         return analysis
 
@@ -286,14 +277,21 @@ def analyze_dir(
     embedder: Embedder | None = None,
     cache: Cache | None = None,
 ) -> DirAnalysis:
-    """Judge a single folder, ignoring what is in its subfolders."""
+    """Judge a single folder, ignoring what is in its subfolders.
+
+    Folders below it are still read, but only to build a profile of each, so
+    that loose files here can be recognised as resembling one of them.
+    """
     engine = Engine(settings, embedder, cache)
-    contents = read_dir(Path(path).expanduser().resolve(), settings)
+    root = Path(path).expanduser().resolve()
+    contents = read_dir(root, settings)
+
     profiles = {}
-    for sub in contents.subdirs:
-        sub_files = read_dir(sub, settings).files
-        if len(sub_files) >= settings.meaningful_cluster_min:
-            profiles[sub] = engine.profile(sub_files)
+    for sub_contents in walk(root, settings):
+        if sub_contents.path.resolve() == root:
+            continue
+        if len(sub_contents.files) >= settings.meaningful_cluster_min:
+            profiles[sub_contents.path.resolve()] = engine.profile(sub_contents.files)
     return engine.analyze(contents, profiles)
 
 
@@ -322,10 +320,13 @@ def analyze_tree(
     results: list[DirAnalysis] = []
     for contents in all_contents:
         key = contents.path.resolve()
+        # Every folder underneath, not just the immediate children. People file
+        # things away several levels down — ./Archive/2023/Taxes — and loose
+        # paperwork upstairs resembles that folder just as much for being deep.
         child_profiles = {
-            sub: profiles[sub.resolve()]
-            for sub in contents.subdirs
-            if sub.resolve() in profiles and sub.resolve() in by_path
+            other: profile
+            for other, profile in profiles.items()
+            if other != key and other.is_relative_to(key) and other in by_path
         }
         results.append(engine.analyze(contents, child_profiles, records.get(key)))
 

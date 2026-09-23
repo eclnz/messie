@@ -22,7 +22,6 @@ from corpus import DEV_TOPICS, OFFICE_TOPICS, PERSONAL_TOPICS  # noqa: E402
 from corpus.build import (  # noqa: E402
     add_debris,
     add_duplicates,
-    add_garbled,
     add_installers,
     add_topic,
     add_version_pileup,
@@ -47,7 +46,6 @@ def build(root: Path, seed: int = 0) -> Path:
             age(path, years * 365)
     add_installers(downloads)
     add_debris(downloads)
-    add_garbled(downloads, 3)
     add_duplicates(downloads)
     add_version_pileup(downloads)
     build_album(downloads, 8, seed=seed, prefix="IMG")
@@ -67,12 +65,6 @@ def build(root: Path, seed: int = 0) -> Path:
 
     # Every file about something different: the hardest case there is.
     build_assorted(root / "Desktop", 18, seed=seed)
-
-    # Files that have stopped saying anything: a folder recovered off a failing
-    # disk, where half of what came back is corrupt.
-    recovered = root / "Archive" / "Recovered"
-    add_topic(recovered, personal[2], 5, seed=seed)
-    add_garbled(recovered, 7, seed=seed)
 
     # A big flat pile, of one subject but far too many of it.
     heap = root / "Archive" / "Scans"

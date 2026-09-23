@@ -41,9 +41,6 @@ class Settings:
 
     # --- content ------------------------------------------------------------
     text_excerpt_chars: int = 4000
-    #: Below this legibility score a file is reported as garbled and kept
-    #: out of the topic clustering. See messie.legibility.
-    legibility_floor: float = 0.45
     max_read_bytes: int = 1 << 20  # never read more than 1 MiB off disk per file
     # Below this much extracted text, lean on the filename instead of content.
     min_text_chars: int = 120
@@ -72,18 +69,24 @@ class Settings:
 
     # --- signal thresholds --------------------------------------------------
     overcrowded_soft_limit: int = 40
-    type_soup_entropy_floor: float = 0.35
     time_strata_gap_days: float = 365.0
 
     # --- scoring ------------------------------------------------------------
     signal_weights: dict[str, float] = field(
         default_factory=lambda: {
             "unrelated_topics": 1.00,
-            "no_common_thread": 0.70,
-            "garbled": 0.55,
+            # Two wordings of one signal at different intensities, so they must
+            # weigh the same: otherwise the score would jump at the point where
+            # "some files do not belong" becomes "nothing here belongs".
+            #
+            # Set near unrelated_topics rather than between the two weights this
+            # replaced. The severity ramp already keeps a handful of strays mild;
+            # the weight governs the far end, where nothing in the folder relates
+            # to anything, and that deserves to rank with "four unrelated things
+            # are living here" rather than below it.
+            "no_common_thread": 0.85,
+            "strays": 0.85,
             "misfiled_neighbours": 0.60,
-            "strays": 0.55,
-            "type_soup": 0.50,
             "time_strata": 0.40,
             "overcrowded": 0.40,
             "debris": 0.35,

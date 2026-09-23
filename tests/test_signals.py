@@ -26,9 +26,23 @@ def finding(analysis, code):
     return next(f for f in analysis.findings if f.code == code)
 
 
+#: Bodies have to clear ``min_text_chars``, or the signals that ask whether a
+#: file belongs with anything will rightly decline to judge them: a one-line
+#: note is uninformative rather than unrelated.
+_BODY = (
+    "This document is about {marker}, number {i} in the series. It concerns "
+    "{marker} throughout, discussing {marker} at some length so that there is "
+    "enough of it to form a considered view of the subject matter."
+)
+
+
+def body_for(marker: str, i: int) -> str:
+    return _BODY.format(marker=marker, i=i)
+
+
 def topic_files(folder: Path, marker: str, count: int, ext: str = "txt", start: int = 0):
     for i in range(start, start + count):
-        write_text(folder / f"{marker}_{i}.{ext}", f"This document is about {marker} number {i}.")
+        write_text(folder / f"{marker}_{i}.{ext}", body_for(marker, i))
 
 
 def age(path: Path, days: float):
@@ -85,7 +99,11 @@ def test_strays_are_reported(tmp_path, fake_embedder):
     folder = tmp_path / "with_strays"
     topic_files(folder, "alpha", 6)
     for i in range(4):
-        write_text(folder / f"loner_{i}.txt", f"An entirely unshared subject {i}.")
+        write_text(
+            folder / f"loner_{i}.txt",
+            f"An entirely unshared subject, number {i}, sharing no vocabulary with "
+            f"anything else in this folder and belonging to no group within it.",
+        )
     analysis = analyze_dir(folder, embedder=fake_embedder)
     assert "strays" in codes(analysis)
 
@@ -101,25 +119,6 @@ def test_unreadable_files_are_not_strays(tmp_path, fake_embedder):
 
 
 # --- shape ------------------------------------------------------------------
-
-
-def test_type_soup(tmp_path, fake_embedder):
-    folder = tmp_path / "drawer"
-    write_blob(folder / "photo1.jpg"), write_blob(folder / "photo2.jpg")
-    write_blob(folder / "setup.exe"), write_blob(folder / "tool.dmg")
-    write_text(folder / "notes.txt", "alpha notes")
-    write_text(folder / "sheet.csv", "a,b,c")
-    write_blob(folder / "song.mp3"), write_blob(folder / "clip.mp4")
-    write_blob(folder / "archive.zip")
-    analysis = analyze_dir(folder, embedder=fake_embedder)
-    assert "type_soup" in codes(analysis)
-
-
-def test_one_kind_is_not_soup(tmp_path, fake_embedder):
-    folder = tmp_path / "photos"
-    for i in range(12):
-        write_blob(folder / f"p{i}.jpg", 3000 + i)
-    assert "type_soup" not in codes(analyze_dir(folder, embedder=fake_embedder))
 
 
 def test_overcrowded(tmp_path, fake_embedder):

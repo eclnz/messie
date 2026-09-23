@@ -77,10 +77,8 @@ messie ~/Downloads --fail-over chaotic || notify-send "your Downloads folder"
 |---|---|
 | **unrelated topics** | two or more unrelated subjects sharing one folder — the main event |
 | **nothing in common** | no organising subject at all: every file about something different |
-| **garbled** | files whose contents have stopped being language at all |
 | **strays** | files that match nothing else present |
-| **misfiled neighbours** | loose files that read like the contents of a subfolder sitting right there |
-| **type soup** | many different *sorts* of file evenly mixed — part photo album, part installer cache |
+| **misfiled neighbours** | loose files that read like the contents of a folder further down |
 | **overcrowded** | far too many files loose in one flat folder |
 | **debris** | `~$report.docx`, `.crdownload`, `.DS_Store`, zero-byte and never-named files |
 | **version pileups** | `report.docx`, `report_final.docx`, `report_final_v2 (copy).docx` |
@@ -136,25 +134,54 @@ Extracted text is cached in `~/.cache/messie/`, keyed by path, size and
 modification time, so re-running on a large folder is cheap. `--no-cache` turns
 that off.
 
-## Files that say nothing
+## Reading binaries
 
-Folders do not only collect unrelated things. They collect files whose contents
-have stopped meaning anything — downloads that finished corrupt, text mangled by
-an encoding round-trip, a payload saved with a `.txt` extension, a scan OCR'd
-into rubbish. Incoherence is evidence in its own right, and it has to be caught
-head on: a garbled file has no subject, so it joins no group and every signal
-that works by finding structure is blind to it. Left in the clustering, a
-handful of corrupt files will happily group together and be reported as a topic,
-so they are held out of it and counted separately.
+Photographs, music and installers cannot be read, so every one of them used to
+be represented by the same stand-in phrase — `photograph picture image` for
+every photograph anybody has ever taken. Three kinds of file now say something
+about themselves, using the standard library alone:
 
-The check is deliberately cautious, because there are many ways to be legible.
-Source code, CSV extracts, logs full of hashes and minified JavaScript are all
-legitimate and none of them read like prose, so word-shape tests apply only to
-files that are meant to be prose, and tables and settings dumps are recognised
-and exempted even when saved as `.txt`. Text in a script the check cannot reason
-about — Chinese, Arabic, Hebrew, Devanagari — is given the benefit of the doubt
-rather than called gibberish for lacking Latin vowels. Across the 210 documents
-of the example corpus, nothing is flagged.
+- **archives** — the member list. A zip of holiday photos and a zip of tax
+  papers are plainly different things, and the manifest says so.
+- **fonts** — family and foundry from the sfnt name table, worth 0.60 of
+  separation between real font directories where there was none.
+- **images** — dimensions, which is thin, but is what stopped a real folder of
+  bullet graphics fragmenting into fifteen meaningless groups.
+
+Byte-level similarity was tried first and measured. Normalized compression
+distance separates same-folder from cross-folder files by 0.72 for SVG (which
+is really text) and 0.13 for shared libraries, but by only 0.016 for PNG, 0.005
+for TrueType and 0.002 for gzip: compressed formats are entropy-coded, so their
+bytes look random whatever the content. It cannot see photographs, so it is not
+used.
+
+EXIF and audio tags were built and then removed. Telling one camera's
+photographs from another's is discrimination between things that are alike, and
+a Pictures folder holding two cameras is normal rather than messy — the
+capability cost two dependencies and changed no verdict. messie is for noticing
+obviously mixed content, not for splitting hairs.
+
+## What was removed, and why
+
+Two signals were deleted after being measured against real files rather than
+against fixtures:
+
+- **garbled** flagged files whose contents had stopped being language. Across
+  5,080 real files it flagged 143 — **2.81%, every one of them wrong** — while
+  finding no genuinely garbled file at all. `# --- section ---` comments tripped
+  it, so it flagged messie's own source, and flagged files were silently
+  dropped from clustering. It handled a rare case with hand-tuned thresholds
+  and had been validated on eight flavours of synthetic nonsense written in the
+  same hour as the eight checks that caught them.
+- **type soup** fired on more folders than any other signal and never once
+  changed a verdict band. A signal that decides nothing is weight without a
+  vote.
+
+Real directories are now a permanent part of the test suite
+(`tests/test_real_world.py`). They are large, free, and nobody arranged them to
+suit messie. On 75 coherent package directories, **1.3% read as messy**, down
+from 16.0% before those deletions and before `misfiled_neighbours` stopped
+reporting packages for resembling their own subpackages.
 
 ## Limitations
 
@@ -164,12 +191,21 @@ of the example corpus, nothing is flagged.
   remaining 16% are adjacent subjects it files as one. Install
   `messie[model2vec]` or `messie[st]` for a stronger model if that matters to
   you; both fetch a model once, so they need the network that first time.
-- **Images, audio and video are judged by name and kind only.** There is no
-  vision model here; a folder of photos is taken on trust.
+- **Photographs are taken on trust.** There is no vision model here. Images
+  contribute their dimensions and their filenames, nothing more, so two camera
+  rolls in one folder read as one thing — which is the intended answer.
+- **Audio and video say nothing beyond their filenames.**
+- **`overcrowded` fires on 13% of real package directories** and
+  `unrelated_topics` on 8%. Those are libraries rather than personal folders,
+  and the thresholds are deliberately not tuned to them, but the numbers are
+  worth knowing.
 - **Where the line falls is a judgement call.** Are tax returns and client
   invoices one subject or two? A semantic backend will usually say one. Tune
   with `--threshold` if your sense of it differs.
 - **Scanned PDFs have no text to read.** There is no OCR.
+- **messie is built for English.** Other Latin-script languages mostly work,
+  but the default backend tends to group non-English documents by language
+  rather than by subject, so verdicts on them are unreliable.
 
 ## Example datasets
 

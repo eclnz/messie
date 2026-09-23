@@ -12,14 +12,7 @@ import time
 from pathlib import Path
 
 from corpus import EXTENSIONS, TOPICS
-from corpus.synth import (
-    GARBLE_FLAVOURS,
-    write_empty,
-    write_file,
-    write_garbled,
-    write_image,
-    write_plain,
-)
+from corpus.synth import write_empty, write_file, write_image, write_plain
 
 DAY = 86400.0
 
@@ -192,23 +185,76 @@ def add_installers(folder: Path, *, seed: int = 0) -> list[Path]:
     return [write_file(folder / name, name) for name in names]
 
 
-def add_garbled(folder: Path, count: int = 5, *, seed: int = 0) -> list[Path]:
-    """Files whose contents have stopped meaning anything.
+# --- cases the corpus could not express before ------------------------------
 
-    One of each flavour of nonsense: a bad encoding round-trip, a payload saved
-    with the wrong extension, a scan OCR'd into rubbish, a corrupt download.
+
+def add_same_document_in_many_formats(
+    folder: Path,
+    topic: str,
+    formats: tuple[str, ...] = ("docx", "pdf", "txt", "rtf", "odt"),
+    *,
+    index: int = 0,
+) -> list[Path]:
+    """One document, saved five times in five formats.
+
+    Real folders are full of these — the .docx somebody wrote, the .pdf they
+    sent, the .txt somebody pasted. Each extractor returns slightly different
+    text for the same content, so this is the case where duplicate detection
+    has to work across formats or admit that it does not.
     """
-    rng = random.Random(f"garbled:{seed}")
-    flavours = list(GARBLE_FLAVOURS)
-    names = [
-        "scanned contract", "notes from meeting", "exported report",
-        "chapter draft", "receipt march", "address list", "old backup notes",
-        "invoice archive",
-    ]
+    stem, text = TOPICS[topic][index % len(TOPICS[topic])]
+    return [write_file(folder / f"{stem}.{ext}", text) for ext in formats]
+
+
+def build_named_album(folder: Path, topic: str, count: int = 12, *, seed: int = 0) -> Path:
+    """Photographs whose filenames actually say something.
+
+    Albums in the fixtures have only ever used opaque names (DSC_0001), which
+    means the filename-only vector path has never been tried against real
+    words. A folder of photos named after what is in them should group by
+    those names.
+    """
+    rng = random.Random(f"named-album:{seed}")
+    source = TOPICS[topic]
+    for i in range(count):
+        stem, _ = source[i % len(source)]
+        ext = rng.choice(["jpg", "jpg", "heic", "png"])
+        write_image(_unique(folder, f"{stem} {i + 1:02d}", ext), size=16_000 + i * 131)
+    return folder
+
+
+def add_short_notes(folder: Path, topic: str, count: int = 8, *, seed: int = 0) -> list[Path]:
+    """One-line notes, below the threshold where content outweighs the name.
+
+    Short files take a different path through the vector mix, leaning on the
+    filename instead of the body, and nothing has exercised it with real words.
+    """
+    rng = random.Random(f"short:{seed}")
+    source = TOPICS[topic]
     written = []
     for i in range(count):
-        flavour = flavours[i % len(flavours)]
-        stem = names[i % len(names)]
-        ext = rng.choice(["txt", "txt", "md", "docx", "rtf"])
-        written.append(write_garbled(_unique(folder, stem, ext), flavour, seed=f"{seed}:{i}"))
+        stem, text = source[i % len(source)]
+        # Hard cap the length. Splitting on the first full stop looks tidier but
+        # silently does nothing to content without prose sentences — a SQL file
+        # came back 600 characters long, and these are supposed to be one-liners.
+        line = " ".join(text.split())[:70].rstrip()
+        stem, line = _vary(stem, line, i // len(source))
+        ext = rng.choice(["txt", "md"])
+        written.append(write_plain(_unique(folder, stem, ext), line))
     return written
+
+
+def build_nested_misfile(root: Path, topic: str, other: str, *, depth: int = 3) -> Path:
+    """A subject filed away several levels down, with loose copies at the top.
+
+    misfiled_neighbours only ever compares a folder against its direct
+    children, so a tree where the matching folder is deeper has never been
+    tried.
+    """
+    deep = root
+    for level in range(depth):
+        deep = deep / f"level_{level + 1}"
+    build_coherent(deep, topic, 6)
+    add_topic(root, other, 6, seed=1)
+    add_topic(root, topic, 3, seed=2)
+    return root

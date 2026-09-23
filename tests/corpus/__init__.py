@@ -9,13 +9,14 @@ where every single file is about something different.
 
 from __future__ import annotations
 
-from corpus import dev, office, personal
+from corpus import accented, dev, office, personal
 
 #: topic key -> [(filename_stem, body_text), ...]
 TOPICS: dict[str, list[tuple[str, str]]] = {
     **office.TOPICS,
     **dev.TOPICS,
     **personal.TOPICS,
+    **accented.TOPICS,
 }
 
 #: topic key -> plausible extensions for that subject
@@ -23,11 +24,14 @@ EXTENSIONS: dict[str, tuple[str, ...]] = {
     **office.EXTENSIONS,
     **dev.EXTENSIONS,
     **personal.EXTENSIONS,
+    **accented.EXTENSIONS,
 }
 
 OFFICE_TOPICS = tuple(office.TOPICS)
 DEV_TOPICS = tuple(dev.TOPICS)
 PERSONAL_TOPICS = tuple(personal.TOPICS)
+#: Subjects written in English but thick with diacritics.
+ACCENTED_TOPICS = tuple(accented.TOPICS)
 ALL_TOPICS = tuple(TOPICS)
 
 
@@ -40,6 +44,6 @@ def extensions(topic: str) -> tuple[str, ...]:
 
 
 __all__ = [
-    "ALL_TOPICS", "DEV_TOPICS", "EXTENSIONS", "OFFICE_TOPICS", "PERSONAL_TOPICS",
-    "TOPICS", "entries", "extensions",
+    "ACCENTED_TOPICS", "ALL_TOPICS", "DEV_TOPICS", "EXTENSIONS", "OFFICE_TOPICS",
+    "PERSONAL_TOPICS", "TOPICS", "entries", "extensions",
 ]

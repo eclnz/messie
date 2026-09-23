@@ -180,7 +180,7 @@ def test_a_realistic_downloads_drawer(tmp_path, real_embedder):
     analysis = analyze_dir(folder, embedder=real_embedder)
     found = codes(analysis)
     assert analysis.verdict >= Verdict.MESSY
-    for expected in ("debris", "version_pileups", "duplicates", "type_soup"):
+    for expected in ("debris", "version_pileups", "duplicates"):
         assert expected in found, f"{expected} missing from {found}"
 
 

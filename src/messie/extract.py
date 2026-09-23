@@ -4,6 +4,9 @@ Only ever reads the front of a file. Office formats are handled with the
 standard library alone: .docx/.pptx/.xlsx/.epub are zip archives of XML, so
 there is no need for a third-party parser.
 
+Files with no prose in them are handed to ``messie.metadata``, which reads
+what their container says about them instead.
+
 Every extractor is best-effort. A file that cannot be read yields "" and the
 caller falls back to the filename.
 """
@@ -17,11 +20,12 @@ from pathlib import Path
 
 from messie.config import DEFAULT_SETTINGS, Settings
 from messie.kinds import is_textual
+from messie.metadata import describe
 from messie.scan import FileEntry
 
 _TAG_RE = re.compile(r"<[^>]+>")
-# Collapse runs of spaces and tabs, but keep newlines: line structure is what
-# tells a table apart from prose, and messie's legibility check needs it.
+# Collapse runs of spaces and tabs, but keep newlines. Line structure is part
+# of what a file says: a table is not prose, and flattening it loses that.
 _WS_RE = re.compile(r"[^\S\n]+")
 _BLANK_RE = re.compile(r"\n{3,}")
 # OOXML marks paragraph and cell boundaries; turn them into spaces, not nothing,
@@ -94,9 +98,61 @@ def _from_plain(path: Path, limit: int, max_bytes: int) -> str:
     return _clean(_decode(raw), limit)
 
 
+#: RTF groups that hold machinery rather than prose. Their *contents* are
+#: readable words — font and colour names, style names, the producing
+#: application — so stripping control words alone leaves "Helvetica;" and
+#: "Times New Roman;" sitting at the front of every document's text, where they
+#: pollute the vector and make two unrelated files look slightly alike.
+_RTF_MACHINERY = frozenset(
+    {
+        "fonttbl", "colortbl", "stylesheet", "info", "pict", "listtable",
+        "listoverridetable", "rsidtbl", "generator", "themedata", "datastore",
+        "latentstyles", "xmlnstbl", "filetbl", "revtbl",
+    }
+)
+
+
+def _drop_rtf_groups(text: str) -> str:
+    """Remove whole ``{\\fonttbl ...}`` style groups, braces and all."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            out.append(text[i])
+            i += 1
+            continue
+
+        k = i + 1
+        if k < n and text[k] == "\\":
+            k += 1
+            if k < n and text[k] == "*":
+                k += 1
+                if k < n and text[k] == "\\":
+                    k += 1
+            word = ""
+            while k < n and text[k].isalpha():
+                word += text[k]
+                k += 1
+            if word.lower() in _RTF_MACHINERY:
+                depth = 0
+                while i < n:  # skip to the matching close brace
+                    if text[i] == "{":
+                        depth += 1
+                    elif text[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            i += 1
+                            break
+                    i += 1
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def _from_rtf(path: Path, limit: int, max_bytes: int) -> str:
     raw = _from_plain(path, limit * 4, max_bytes)
-    return _clean(_RTF_CTRL_RE.sub(" ", raw), limit)
+    return _clean(_RTF_CTRL_RE.sub(" ", _drop_rtf_groups(raw)), limit)
 
 
 def _from_html(path: Path, limit: int, max_bytes: int) -> str:
@@ -140,9 +196,17 @@ def _from_legacy_doc(path: Path, limit: int, max_bytes: int) -> str:
 
 
 def extract_text(entry: FileEntry, settings: Settings = DEFAULT_SETTINGS) -> str:
-    """Readable text from a file, or "" if there is none to be had."""
-    if not is_textual(entry.kind) or entry.size == 0:
+    """What a file says, or "" if it says nothing.
+
+    Documents say it in words. Photographs, music, video, archives and fonts
+    say it in their container metadata — the camera that took it, the album it
+    belongs to, the members inside it — which ``messie.metadata`` turns into a
+    short phrase. Either way the caller gets text and need not care which.
+    """
+    if entry.size == 0:
         return ""
+    if not is_textual(entry.kind):
+        return describe(entry)
 
     ext, path = entry.ext, entry.path
     limit, max_bytes = settings.text_excerpt_chars, settings.max_read_bytes

@@ -136,6 +136,17 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
         lines.append(
             _paint(f"      ({analysis.truncated} further files not read)", _DIM, colour)
         )
+    if analysis.failed_signals:
+        # A signal that crashed and a signal that had nothing to say look
+        # identical from out here. Say which happened.
+        lines.append(
+            _paint(
+                "  ! these checks could not run: "
+                + ", ".join(sorted(set(analysis.failed_signals))),
+                _COLOURS[Verdict.MESSY],
+                colour,
+            )
+        )
     return lines
 
 
@@ -183,6 +194,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
         "score": analysis.score,
         "verdict": analysis.verdict.label,
         "clusters": (analysis.clustering.n_clusters if analysis.clustering else 0),
+        "failed_signals": analysis.failed_signals,
         "findings": [
             {
                 "code": f.code,

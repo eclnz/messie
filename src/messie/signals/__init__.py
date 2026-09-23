@@ -48,13 +48,7 @@ def signal(fn: SignalFn) -> SignalFn:
 
 def run_all(analysis: DirAnalysis) -> list[Finding]:
     """Every registered signal, strongest first."""
-    from messie.signals import (  # noqa: F401  (registration)
-        debris,
-        quality,
-        temporal,
-        topics,
-        types,
-    )
+    from messie.signals import debris, temporal, topics, types  # noqa: F401
 
     failed_signals.clear()
 
