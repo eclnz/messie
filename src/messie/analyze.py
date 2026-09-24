@@ -12,13 +12,14 @@ from typing import NamedTuple
 
 import numpy as np
 
+from messie.binary_description import describe_binary
+from messie.cache import EvidenceCache
 from messie.cluster import Clustering, cluster_vectors
 from messie.config import DEFAULT_SETTINGS, Settings, Thresholds
 from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
 from messie.kinds import Kind, is_textual, kind_phrase
 from messie.label import file_terms, format_label, label_clusters
-from messie.binary_description import describe_binary
 from messie.result import DirAnalysis, Finding, SkipReason, Verdict
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.signals import run_all
@@ -171,10 +172,21 @@ def _mix_for(entry: FileEntry, text: str, name: str, settings: Settings) -> Mix:
 
 
 def vectorize(
-    files: list[FileEntry], *, embedder: Embedder, settings: Settings = DEFAULT_SETTINGS
+    files: list[FileEntry],
+    *,
+    embedder: Embedder,
+    settings: Settings = DEFAULT_SETTINGS,
+    cache: EvidenceCache | None = None,
 ) -> VectorRecord:
     """Turn scanned files into the evidence needed by signals."""
-    texts = [extract_text(file, settings) or describe_binary(file, settings) for file in files]
+    texts: list[str] = []
+    for file in files:
+        text = cache.get(file) if cache is not None else None
+        if text is None:
+            text = extract_text(file, settings) or describe_binary(file, settings)
+            if cache is not None:
+                cache.put(file, text)
+        texts.append(text)
     names = _name_phrases(files)
     text_vectors = embedder.encode(texts)
     name_vectors = embedder.encode(names)
@@ -204,11 +216,15 @@ def profile_of(vectors: np.ndarray) -> np.ndarray:
 
 
 def profile(
-    files: list[FileEntry], *, embedder: Embedder, settings: Settings = DEFAULT_SETTINGS
+    files: list[FileEntry],
+    *,
+    embedder: Embedder,
+    settings: Settings = DEFAULT_SETTINGS,
+    cache: EvidenceCache | None = None,
 ) -> np.ndarray:
     if not files:
         return np.zeros(0, dtype=np.float32)
-    return profile_of(vectorize(files, embedder=embedder, settings=settings).vectors)
+    return profile_of(vectorize(files, embedder=embedder, settings=settings, cache=cache).vectors)
 
 
 def analyze(
@@ -272,6 +288,7 @@ def _descendant_profiles(
     root: Path,
     settings: Settings,
     embedder: Embedder,
+    cache: EvidenceCache,
 ) -> dict[Path, np.ndarray]:
     """Profiles of meaningful folders below ``root`` for misfiling checks."""
     profiles: dict[Path, np.ndarray] = {}
@@ -279,7 +296,9 @@ def _descendant_profiles(
         path = contents.path.resolve()
         if path == root or len(contents.files) < settings.meaningful_cluster_min:
             continue
-        profiles[path] = profile(contents.files, embedder=embedder, settings=settings)
+        profiles[path] = profile(
+            contents.files, embedder=embedder, settings=settings, cache=cache
+        )
     return profiles
 
 
@@ -291,12 +310,20 @@ def analyze_dir(
     "Judge a single folder, ignoring what is in its subfolders."
     embedder = embedder or get_embedder()
     root = path.expanduser().resolve()
-    return analyze(
-        read_dir(root, settings),
-        embedder=embedder,
-        settings=settings,
-        child_profiles=_descendant_profiles(root, settings, embedder),
-    )
+    with EvidenceCache(settings) as cache:
+        contents = read_dir(root, settings)
+        record = (
+            vectorize(contents.files, embedder=embedder, settings=settings, cache=cache)
+            if len(contents.files) >= settings.min_files_to_judge
+            else None
+        )
+        return analyze(
+            contents,
+            embedder=embedder,
+            settings=settings,
+            child_profiles=_descendant_profiles(root, settings, embedder, cache),
+            precomputed=record,
+        )
 
 
 def _vectorized_profiles(
@@ -304,6 +331,7 @@ def _vectorized_profiles(
     settings: Settings,
     embedder: Embedder,
     report: ProgressFn,
+    cache: EvidenceCache,
 ) -> tuple[dict[Path, VectorRecord], dict[Path, np.ndarray]]:
     """Vectorise each meaningful folder once and derive its profile."""
     records: dict[Path, VectorRecord] = {}
@@ -313,7 +341,9 @@ def _vectorized_profiles(
         if len(folder.files) < settings.meaningful_cluster_min:
             continue
         path = folder.path.resolve()
-        records[path] = vectorize(folder.files, embedder=embedder, settings=settings)
+        records[path] = vectorize(
+            folder.files, embedder=embedder, settings=settings, cache=cache
+        )
         profiles[path] = profile_of(records[path].vectors)
     return records, profiles
 
@@ -368,12 +398,13 @@ def analyze_tree(
     root = Path(root).expanduser().resolve()
     contents = walk(root, settings)
     report(Progress("scan", len(contents), len(contents), root))
-    records, profiles = _vectorized_profiles(contents, settings, embedder, report)
-    return _judge_tree(
-        contents,
-        settings,
-        embedder,
-        records,
-        _profiles_by_ancestor(contents, profiles),
-        report,
-    )
+    with EvidenceCache(settings) as cache:
+        records, profiles = _vectorized_profiles(contents, settings, embedder, report, cache)
+        return _judge_tree(
+            contents,
+            settings,
+            embedder,
+            records,
+            _profiles_by_ancestor(contents, profiles),
+            report,
+        )
