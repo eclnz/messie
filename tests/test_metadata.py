@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from messie.kinds import Kind
 from messie.metadata import (
     _category_words,
     _clip,
@@ -86,7 +87,7 @@ def test_a_wheel_is_an_archive_despite_its_extension(tmp_path):
         archive.writestr("widgets/rendering.py", b"x")
         archive.writestr("widgets/layout.py", b"x")
 
-    assert entry_for(path).kind == "unknown"
+    assert entry_for(path).kind is Kind.UNKNOWN
     assert {"rendering", "layout"} <= set(describe(entry_for(path)).split())
 
 

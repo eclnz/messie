@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from messie.config import DEFAULT_SETTINGS, Settings
-from messie.kinds import domain_for, kind_for
+from messie.kinds import Domain, Kind, domain_for, kind_for
 
 
 @dataclass(frozen=True)
@@ -18,8 +18,8 @@ class FileEntry:
     path: Path
     size: int
     mtime: float
-    kind: str
-    domain: str
+    kind: Kind
+    domain: Domain
 
     @property
     def name(self) -> str:

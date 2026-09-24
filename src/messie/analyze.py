@@ -1,9 +1,4 @@
-"""Walking a tree and judging every folder in it.
-
-The judging itself lives in :mod:`messie.engine`; what is here is the
-traversal, and the bookkeeping that lets a folder be compared against the
-folders below it without reading anything twice.
-"""
+"Walking a tree and judging every folder in it."
 
 from __future__ import annotations
 
@@ -14,14 +9,13 @@ from pathlib import Path
 import numpy as np
 
 from messie.config import DEFAULT_SETTINGS, Settings
-from messie.embed import Embedder
-from messie.engine import Engine
+from messie.embed import Embedder, get_embedder
+from messie.engine import analyze, profile, profile_of, vectorize
 from messie.result import DirAnalysis, VectorRecord
 from messie.scan import read_dir, walk
 
 __all__ = [
     "DirAnalysis",
-    "Engine",
     "Progress",
     "ProgressFn",
     "VectorRecord",
@@ -32,22 +26,11 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Progress:
-    """Where a tree walk has got to.
-
-    Reported rather than printed: a library that writes to a terminal is a
-    library you cannot call from anything else. ``--verbose`` supplies a
-    callback that draws it; everything else passes nothing and pays nothing.
-    """
-
-    #: ``scan`` while finding folders, ``read`` while extracting and embedding
-    #: them, ``judge`` while running the signals.
+    "Where a tree walk has got to."
     stage: str
     done: int
     total: int
-    #: The folder being worked on, which is the thing worth naming: when a file
-    #: makes an extractor or a model throw, this is what says which one.
     path: Path | None = None
-    #: Files in that folder, where the stage knows.
     files: int = 0
 
 
@@ -55,16 +38,12 @@ ProgressFn = Callable[[Progress], None]
 
 
 def analyze_dir(
-    path: Path | str,
+    path: Path,
     settings: Settings = DEFAULT_SETTINGS,
     embedder: Embedder | None = None,
 ) -> DirAnalysis:
-    """Judge a single folder, ignoring what is in its subfolders.
-
-    Folders below it are still read, but only to build a profile of each, so
-    that loose files here can be recognised as resembling one of them.
-    """
-    engine = Engine(settings, embedder)
+    "Judge a single folder, ignoring what is in its subfolders."
+    embedder = embedder or get_embedder()
     root = Path(path).expanduser().resolve()
     contents = read_dir(root, settings)
 
@@ -73,8 +52,10 @@ def analyze_dir(
         if sub_contents.path.resolve() == root:
             continue
         if len(sub_contents.files) >= settings.meaningful_cluster_min:
-            profiles[sub_contents.path.resolve()] = engine.profile(sub_contents.files)
-    return engine.analyze(contents, profiles)
+            profiles[sub_contents.path.resolve()] = profile(
+                sub_contents.files, embedder=embedder, settings=settings
+            )
+    return analyze(contents, embedder=embedder, settings=settings, child_profiles=profiles)
 
 
 def analyze_tree(
@@ -84,7 +65,7 @@ def analyze_tree(
     progress: ProgressFn | None = None,
 ) -> list[DirAnalysis]:
     """Judge every folder at or under ``root``, worst first."""
-    engine = Engine(settings, embedder)
+    embedder = embedder or get_embedder()
     report: ProgressFn = progress or (lambda _: None)
 
     all_contents = walk(Path(root), settings)
@@ -101,8 +82,8 @@ def analyze_tree(
         if len(contents.files) < settings.meaningful_cluster_min:
             continue
         key = contents.path.resolve()
-        records[key] = engine.vectorize(contents.files)
-        profiles[key] = engine.profile_of(records[key].vectors)
+        records[key] = vectorize(contents.files, embedder=embedder, settings=settings)
+        profiles[key] = profile_of(records[key].vectors)
 
     # Every folder underneath, not just the immediate children. People file
     # things away several levels down — ./Archive/2023/Taxes — and loose
@@ -125,7 +106,13 @@ def analyze_tree(
         report(Progress("judge", done, total, contents.path, len(contents.files)))
         key = contents.path.resolve()
         results.append(
-            engine.analyze(contents, descendants.get(key, {}), records.get(key))
+            analyze(
+                contents,
+                embedder=embedder,
+                settings=settings,
+                child_profiles=descendants.get(key, {}),
+                precomputed=records.get(key),
+            )
         )
 
     results.sort(key=lambda a: (-a.score, str(a.path)))

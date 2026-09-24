@@ -50,6 +50,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+from messie.kinds import Kind
 from messie.scan import FileEntry
 
 #: Never read more than this from a file just to describe it.
@@ -301,11 +302,11 @@ def describe(entry: FileEntry) -> str:
     if entry.size == 0:
         return ""
     try:
-        if entry.ext in _ARCHIVE_EXTS or entry.kind == "archive":
+        if entry.ext in _ARCHIVE_EXTS or entry.kind is Kind.ARCHIVE:
             return _describe_archive(entry.path)
-        if entry.ext in _FONT_EXTS or entry.kind == "font":
+        if entry.ext in _FONT_EXTS or entry.kind is Kind.FONT:
             return _describe_font(entry.path)
-        if entry.kind == "image":
+        if entry.kind is Kind.IMAGE:
             return _describe_image(entry.path)
     except Exception:  # noqa: BLE001 - describing a file must never fail a scan
         return ""

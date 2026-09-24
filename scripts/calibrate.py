@@ -60,10 +60,10 @@ from corpus import ALL_TOPICS, TOPICS  # noqa: E402
 from corpus.build import build_coherent, build_mixed  # noqa: E402
 from realdirs import coherent_folders  # noqa: E402
 
-from messie.analyze import Engine  # noqa: E402
 from messie.cluster import cluster_vectors  # noqa: E402
 from messie.config import DEFAULT_SETTINGS  # noqa: E402
 from messie.embed import get_embedder  # noqa: E402
+from messie.engine import analyze, profile, vectorize  # noqa: E402
 from messie.scan import read_dir, walk  # noqa: E402
 from messie.score import Verdict  # noqa: E402
 
@@ -201,13 +201,13 @@ def sweep_threshold(
     subjects shatter. The sum of the two rates is maximised at the crossover.
     """
     chosen = list(ALL_TOPICS)[:topics] if topics else list(ALL_TOPICS)
-    engine = Engine(embedder=get_embedder(backend))
+    embedder = get_embedder(backend)
     tmp = Path(tempfile.mkdtemp(prefix="messie-calibrate-"))
 
     single = {}
     for topic in chosen:
         folder = build_coherent(tmp / "one" / topic, topic, 6)
-        single[topic] = engine.vectorize(read_dir(folder).files).vectors
+        single[topic] = vectorize(read_dir(folder).files, embedder=embedder).vectors
 
     rng = random.Random(seed)
     combos = list(itertools.combinations(chosen, 2))
@@ -218,7 +218,7 @@ def sweep_threshold(
         files = read_dir(folder).files
         stems_a = {stem for stem, _ in TOPICS[a]}
         origin = np.array([0 if f.stem in stems_a else 1 for f in files])
-        both[(a, b)] = (engine.vectorize(files).vectors, origin)
+        both[(a, b)] = (vectorize(files, embedder=embedder).vectors, origin)
 
     points = []
     for threshold in np.arange(0.10, 0.50, 0.01):
@@ -257,7 +257,7 @@ def sweep_threshold(
 # should stay quiet, then vary the ratio and count both.
 #
 # Vectors do not depend on either ratio, so every folder is read and embedded
-# once and only ``Engine.analyze`` is re-run. That is the difference between a
+# once and only ``analyze`` is re-run. That is the difference between a
 # sweep that takes twenty seconds and one nobody bothers to run.
 
 
@@ -361,15 +361,13 @@ def sweep_unrelated(
     embedder = get_embedder(backend)
     topics = list(ALL_TOPICS)
     tmp = Path(tempfile.mkdtemp(prefix="messie-unrelated-"))
-    base = Engine(embedder=embedder)
-
     should_fire = []
     rng = random.Random(seed)
     combos = list(itertools.combinations(topics, 2))
     rng.shuffle(combos)
     for a, b in combos[:pairs]:
         contents = read_dir(build_mixed(tmp / "two" / f"{a}__{b}", {a: 6, b: 6}))
-        should_fire.append((contents, base.vectorize(contents.files)))
+        should_fire.append((contents, vectorize(contents.files, embedder=embedder)))
 
     # Real, coherent directories: one project, one purpose, so any
     # unrelated_topics finding on one of them is a false alarm.
@@ -379,7 +377,7 @@ def sweep_unrelated(
             contents = read_dir(folder)
             if len(contents.files) < DEFAULT_SETTINGS.min_files_to_judge:
                 continue
-            should_not.append((contents, base.vectorize(contents.files)))
+            should_not.append((contents, vectorize(contents.files, embedder=embedder)))
         except Exception:  # noqa: BLE001 - unreadable tree, skip it
             continue
 
@@ -387,13 +385,18 @@ def sweep_unrelated(
     at_risk_seen = 0
     for ratio in np.arange(0.20, 1.01, 0.05):
         settings = DEFAULT_SETTINGS.with_(unrelated_rel=float(ratio))
-        engine = Engine(settings, embedder)
         caught = sum(
-            _fires(engine.analyze(c, {}, r), "unrelated_topics") for c, r in should_fire
+            _fires(
+                analyze(c, embedder=embedder, settings=settings, child_profiles={}, precomputed=r),
+                "unrelated_topics",
+            )
+            for c, r in should_fire
         )
         at_risk = alarms = 0
         for c, r in should_not:
-            analysis = engine.analyze(c, {}, r)
+            analysis = analyze(
+                c, embedder=embedder, settings=settings, child_profiles={}, precomputed=r
+            )
             if analysis.clustering is None or len(analysis.meaningful_clusters()) < 2:
                 continue
             at_risk += 1
@@ -434,7 +437,6 @@ def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSw
     from corpus.build import build_nested_misfile
 
     embedder = get_embedder(backend)
-    base = Engine(embedder=embedder)
     tmp = Path(tempfile.mkdtemp(prefix="messie-misfiled-"))
 
     def prepare(root: Path):
@@ -446,8 +448,8 @@ def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSw
             if key == root.resolve():
                 continue
             if len(sub.files) >= DEFAULT_SETTINGS.meaningful_cluster_min:
-                profiles[key] = base.profile(sub.files)
-        return contents, profiles, base.vectorize(contents.files)
+                profiles[key] = profile(sub.files, embedder=embedder)
+        return contents, profiles, vectorize(contents.files, embedder=embedder)
 
     topics = list(ALL_TOPICS)
     positives = []
@@ -467,22 +469,38 @@ def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSw
             candidates.append((contents, profiles, record))
 
     # Which of them this signal can reach at all, at the most permissive margin.
-    permissive = Engine(DEFAULT_SETTINGS.with_(misfiled_margin_rel=0.0), embedder)
+    permissive_settings = DEFAULT_SETTINGS.with_(misfiled_margin_rel=0.0)
     negatives = [
         case
         for case in candidates
-        if _fires(permissive.analyze(case[0], case[1], case[2]), "misfiled_neighbours")
+        if _fires(
+            analyze(
+                case[0],
+                embedder=embedder,
+                settings=permissive_settings,
+                child_profiles=case[1],
+                precomputed=case[2],
+            ),
+            "misfiled_neighbours",
+        )
     ]
 
     rows = []
     for ratio in np.arange(0.0, 0.81, 0.05):
         settings = DEFAULT_SETTINGS.with_(misfiled_margin_rel=float(ratio))
-        engine = Engine(settings, embedder)
         caught = sum(
-            _fires(engine.analyze(c, pr, r), "misfiled_neighbours") for c, pr, r in positives
+            _fires(
+                analyze(c, embedder=embedder, settings=settings, child_profiles=pr, precomputed=r),
+                "misfiled_neighbours",
+            )
+            for c, pr, r in positives
         )
         alarms = sum(
-            _fires(engine.analyze(c, pr, r), "misfiled_neighbours") for c, pr, r in negatives
+            _fires(
+                analyze(c, embedder=embedder, settings=settings, child_profiles=pr, precomputed=r),
+                "misfiled_neighbours",
+            )
+            for c, pr, r in negatives
         )
         rows.append(
             (ratio, caught / max(1, len(positives)), alarms / max(1, len(negatives)))

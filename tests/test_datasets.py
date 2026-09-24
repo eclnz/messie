@@ -27,6 +27,7 @@ from corpus.build import (
 from corpus.synth import write_file
 
 from messie.analyze import analyze_dir
+from messie.kinds import Kind
 from messie.score import Verdict
 
 #: Subjects that do not hold together even for a semantic backend, and why.
@@ -244,7 +245,7 @@ def test_binary_formats_are_recognised_by_kind(ext, kind, tmp_path):
 
     write_file(tmp_path / f"thing.{ext}", "")
     entry = next(f for f in read_dir(tmp_path).files if f.ext == ext)
-    assert entry.kind == kind
+    assert entry.kind is Kind(kind)
     assert entry.size > 0
 
 

@@ -9,56 +9,102 @@ with a disk image.
 from __future__ import annotations
 
 import re
-
-KIND_BY_EXT: dict[str, str] = {}
-
-
-def _register(kind: str, exts: str) -> None:
-    for e in exts.split():
-        KIND_BY_EXT[e] = kind
+from enum import Enum
 
 
-_register("image", "jpg jpeg png gif bmp tiff tif webp heic heif raw cr2 nef arw dng svg ico avif")
-_register("video", "mp4 mov avi mkv wmv flv webm m4v mpg mpeg 3gp mts")
-_register("audio", "mp3 wav flac aac ogg m4a wma aiff opus mid midi")
-_register("document", "doc docx odt rtf pages wpd")
-_register("spreadsheet", "xls xlsx ods numbers")
-_register("presentation", "ppt pptx odp key")
-_register("pdf", "pdf")
-_register("ebook", "epub mobi azw azw3 djvu fb2")
-_register("text", "txt md markdown rst log tex org adoc")
-_register("code", "py js ts jsx tsx java c h cpp hpp cs go rs rb php swift kt scala sh bash zsh "
-                  "ps1 bat pl lua r m sql vim el hs ml clj ex exs dart sc")
-_register("config", "json yaml yml toml ini cfg conf env properties plist xml editorconfig lock")
-_register("data", "csv tsv parquet feather arrow jsonl ndjson xml sav dta rdata rds "
-                  "npy npz mat h5 hdf5")
-_register("notebook", "ipynb rmd qmd")
-_register("archive", "zip tar gz bz2 xz 7z rar tgz tbz zst lz4 cab")
-_register("installer", "exe msi dmg pkg deb rpm appimage apk snap flatpak")
-_register("disk_image", "iso img vhd vmdk vdi qcow2 sparseimage")
-_register("font", "ttf otf woff woff2 eot")
-_register("database", "db sqlite sqlite3 mdb accdb realm")
-_register("design", "psd ai xd fig sketch indd afdesign afphoto blend obj fbx stl step dwg dxf")
-_register("subtitle", "srt vtt ass sub")
-_register("shortcut", "lnk url webloc desktop alias")
-_register("junk", "tmp temp part crdownload partial download bak old swp swo ds_store thumbs "
-                  "lock pid err stackdump dmp")
+class Kind(str, Enum):
+    """A human-recognisable category of file."""
 
-DOMAIN_BY_KIND: dict[str, str] = {
-    "image": "media", "video": "media", "audio": "media", "design": "media",
-    "subtitle": "media", "font": "media",
-    "document": "office", "spreadsheet": "office", "presentation": "office",
-    "pdf": "office", "ebook": "office", "text": "office",
-    "code": "dev", "config": "dev", "notebook": "dev", "data": "dev",
-    "database": "dev",
-    "archive": "system", "installer": "system", "disk_image": "system",
-    "shortcut": "system", "junk": "system", "unknown": "other",
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    DOCUMENT = "document"
+    SPREADSHEET = "spreadsheet"
+    PRESENTATION = "presentation"
+    PDF = "pdf"
+    EBOOK = "ebook"
+    TEXT = "text"
+    CODE = "code"
+    CONFIG = "config"
+    DATA = "data"
+    NOTEBOOK = "notebook"
+    ARCHIVE = "archive"
+    INSTALLER = "installer"
+    DISK_IMAGE = "disk_image"
+    FONT = "font"
+    DATABASE = "database"
+    DESIGN = "design"
+    SUBTITLE = "subtitle"
+    SHORTCUT = "shortcut"
+    JUNK = "junk"
+    UNKNOWN = "unknown"
+
+
+class Domain(str, Enum):
+    """A broad group of related file kinds."""
+
+    MEDIA = "media"
+    OFFICE = "office"
+    DEV = "dev"
+    SYSTEM = "system"
+    OTHER = "other"
+
+
+EXTENSIONS_BY_KIND: dict[Kind, str] = {
+    Kind.IMAGE: "jpg jpeg png gif bmp tiff tif webp heic heif raw cr2 nef arw dng svg ico avif",
+    Kind.VIDEO: "mp4 mov avi mkv wmv flv webm m4v mpg mpeg 3gp mts",
+    Kind.AUDIO: "mp3 wav flac aac ogg m4a wma aiff opus mid midi",
+    Kind.DOCUMENT: "doc docx odt rtf pages wpd",
+    Kind.SPREADSHEET: "xls xlsx ods numbers",
+    Kind.PRESENTATION: "ppt pptx odp key",
+    Kind.PDF: "pdf",
+    Kind.EBOOK: "epub mobi azw azw3 djvu fb2",
+    Kind.TEXT: "txt md markdown rst log tex org adoc",
+    Kind.CODE: "py js ts jsx tsx java c h cpp hpp cs go rs rb php swift kt scala sh bash zsh "
+    "ps1 bat pl lua r m sql vim el hs ml clj ex exs dart sc",
+    Kind.CONFIG: "json yaml yml toml ini cfg conf env properties plist xml editorconfig lock",
+    Kind.DATA: "csv tsv parquet feather arrow jsonl ndjson xml sav dta rdata rds "
+    "npy npz mat h5 hdf5",
+    Kind.NOTEBOOK: "ipynb rmd qmd",
+    Kind.ARCHIVE: "zip tar gz bz2 xz 7z rar tgz tbz zst lz4 cab",
+    Kind.INSTALLER: "exe msi dmg pkg deb rpm appimage apk snap flatpak",
+    Kind.DISK_IMAGE: "iso img vhd vmdk vdi qcow2 sparseimage",
+    Kind.FONT: "ttf otf woff woff2 eot",
+    Kind.DATABASE: "db sqlite sqlite3 mdb accdb realm",
+    Kind.DESIGN: "psd ai xd fig sketch indd afdesign afphoto blend obj fbx stl step dwg dxf",
+    Kind.SUBTITLE: "srt vtt ass sub",
+    Kind.SHORTCUT: "lnk url webloc desktop alias",
+    Kind.JUNK: "tmp temp part crdownload partial download bak old swp swo ds_store thumbs "
+    "lock pid err stackdump dmp",
+}
+
+KIND_BY_EXT: dict[str, Kind] = {
+    extension: kind
+    for kind, extensions in EXTENSIONS_BY_KIND.items()
+    for extension in extensions.split()
+}
+
+DOMAIN_BY_KIND: dict[Kind, Domain] = {
+    Kind.IMAGE: Domain.MEDIA,
+    Kind.VIDEO: Domain.MEDIA,
+    Kind.AUDIO: Domain.MEDIA,
+    Kind.DESIGN: Domain.MEDIA,
+    Kind.SUBTITLE: Domain.MEDIA, Kind.FONT: Domain.MEDIA,
+    Kind.DOCUMENT: Domain.OFFICE, Kind.SPREADSHEET: Domain.OFFICE, Kind.PRESENTATION: Domain.OFFICE,
+    Kind.PDF: Domain.OFFICE, Kind.EBOOK: Domain.OFFICE, Kind.TEXT: Domain.OFFICE,
+    Kind.CODE: Domain.DEV,
+    Kind.CONFIG: Domain.DEV,
+    Kind.NOTEBOOK: Domain.DEV,
+    Kind.DATA: Domain.DEV,
+    Kind.DATABASE: Domain.DEV,
+    Kind.ARCHIVE: Domain.SYSTEM, Kind.INSTALLER: Domain.SYSTEM, Kind.DISK_IMAGE: Domain.SYSTEM,
+    Kind.SHORTCUT: Domain.SYSTEM, Kind.JUNK: Domain.SYSTEM, Kind.UNKNOWN: Domain.OTHER,
 }
 
 # Kinds whose contents are worth reading for meaning.
 TEXTUAL_KINDS = frozenset(
-    {"document", "presentation", "spreadsheet", "pdf", "ebook", "text", "code",
-     "config", "notebook", "data", "subtitle"}
+    {Kind.DOCUMENT, Kind.PRESENTATION, Kind.SPREADSHEET, Kind.PDF, Kind.EBOOK, Kind.TEXT,
+     Kind.CODE, Kind.CONFIG, Kind.NOTEBOOK, Kind.DATA, Kind.SUBTITLE}
 )
 
 # --- clutter patterns ------------------------------------------------------
@@ -103,18 +149,18 @@ OPAQUE_NAME_RE = re.compile(
 )
 
 
-def kind_for(ext: str, name: str = "") -> str:
+def kind_for(ext: str, name: str = "") -> Kind:
     """Kind for an extension (given without the dot, any case)."""
     if name and DEBRIS_NAME_RE.match(name):
-        return "junk"
-    return KIND_BY_EXT.get(ext.lower().lstrip("."), "unknown")
+        return Kind.JUNK
+    return KIND_BY_EXT.get(ext.lower().lstrip("."), Kind.UNKNOWN)
 
 
-def domain_for(kind: str) -> str:
-    return DOMAIN_BY_KIND.get(kind, "other")
+def domain_for(kind: Kind) -> Domain:
+    return DOMAIN_BY_KIND[kind]
 
 
-def is_textual(kind: str) -> bool:
+def is_textual(kind: Kind) -> bool:
     return kind in TEXTUAL_KINDS
 
 
@@ -122,32 +168,32 @@ def is_textual(kind: str) -> bool:
 #: and no meaningful filename (IMG_4412.HEIC) still need *some* vector, and the
 #: honest one is "this is a photo" — which groups them with the other photos
 #: instead of making each one look like an unrelated stray.
-KIND_PHRASE: dict[str, str] = {
-    "image": "photograph picture image snapshot",
-    "video": "video footage movie clip recording",
-    "audio": "audio sound recording music track",
-    "document": "written document text letter report",
-    "spreadsheet": "spreadsheet table of numbers accounts",
-    "presentation": "slide deck presentation talk",
-    "pdf": "pdf document printed page",
-    "ebook": "book ebook reading",
-    "text": "plain text notes writing",
-    "code": "source code program software",
-    "config": "configuration settings file",
-    "data": "dataset records data table",
-    "notebook": "computational notebook analysis",
-    "archive": "compressed archive bundle zip",
-    "installer": "software installer package setup",
-    "disk_image": "disk image system volume",
-    "font": "typeface font",
-    "database": "database file records",
-    "design": "design artwork graphics project",
-    "subtitle": "subtitles captions",
-    "shortcut": "shortcut link",
-    "junk": "temporary leftover file",
-    "unknown": "file",
+KIND_PHRASE: dict[Kind, str] = {
+    Kind.IMAGE: "photograph picture image snapshot",
+    Kind.VIDEO: "video footage movie clip recording",
+    Kind.AUDIO: "audio sound recording music track",
+    Kind.DOCUMENT: "written document text letter report",
+    Kind.SPREADSHEET: "spreadsheet table of numbers accounts",
+    Kind.PRESENTATION: "slide deck presentation talk",
+    Kind.PDF: "pdf document printed page",
+    Kind.EBOOK: "book ebook reading",
+    Kind.TEXT: "plain text notes writing",
+    Kind.CODE: "source code program software",
+    Kind.CONFIG: "configuration settings file",
+    Kind.DATA: "dataset records data table",
+    Kind.NOTEBOOK: "computational notebook analysis",
+    Kind.ARCHIVE: "compressed archive bundle zip",
+    Kind.INSTALLER: "software installer package setup",
+    Kind.DISK_IMAGE: "disk image system volume",
+    Kind.FONT: "typeface font",
+    Kind.DATABASE: "database file records",
+    Kind.DESIGN: "design artwork graphics project",
+    Kind.SUBTITLE: "subtitles captions",
+    Kind.SHORTCUT: "shortcut link",
+    Kind.JUNK: "temporary leftover file",
+    Kind.UNKNOWN: "file",
 }
 
 
-def kind_phrase(kind: str) -> str:
-    return KIND_PHRASE.get(kind, "file")
+def kind_phrase(kind: Kind) -> str:
+    return KIND_PHRASE[kind]
