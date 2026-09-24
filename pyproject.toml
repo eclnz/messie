@@ -9,18 +9,9 @@ description = "Notices when a folder has become a mess. Local only, no external 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-# wordllama carries its own weights inside the wheel, so a plain install is
-# fully offline and always has a backend.
 dependencies = ["numpy>=1.24", "wordllama>=0.4"]
 
 [project.optional-dependencies]
-# There are no alternative-backend extras. model2vec and sentence-transformers
-# were both carried here once; measurement found neither beat wordllama where
-# messie operates, and see messie/embed/__init__.py for the numbers.
-#
-# Reads EXIF, so photographs, scans and screenshots name themselves rather
-# than being three sets of numbers. Images still report their dimensions
-# without it.
 photos = ["pillow>=10.0"]
 pdf = ["pypdf>=4.0"]
 all = ["pypdf>=4.0", "pillow>=10.0"]
@@ -40,11 +31,14 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-# The corpus modules hold verbatim file bodies — log lines, source code, YAML.
-# Wrapping them to suit the Python source would distort the data under test.
 "tests/corpus/office.py" = ["E501"]
 "tests/corpus/dev.py" = ["E501"]
 "tests/corpus/personal.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
