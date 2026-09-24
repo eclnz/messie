@@ -204,11 +204,11 @@ def _overlap_bound(counts_a: Counter[str], counts_b: Counter[str], total: int) -
 def _near_duplicates(analysis: SignalContext, already: set[int]) -> list[tuple[int, int]]:
     """Confirm vector-similar files with their extracted text."""
     clustering = analysis.clustering
-    if clustering is None or clustering.sim.size == 0:
+    if clustering is None or clustering.file_similarity.size == 0:
         return []
 
     threshold = analysis.thresholds.near_duplicate
-    sim = np.triu(clustering.sim, k=1)
+    sim = np.triu(clustering.file_similarity, k=1)
     pairs = np.argwhere(sim >= threshold)
     out: list[tuple[int, int]] = []
     seen: set[int] = set()

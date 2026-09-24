@@ -41,9 +41,9 @@ FUZZ_FOLDERS = 12
 @pytest.fixture(scope="module")
 def embedder():
     try:
-        return get_embedder("wordllama")
+        return get_embedder()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"wordllama unavailable: {exc}")
+        pytest.skip(f"embedder unavailable: {exc}")
 
 
 def _compose(folder: Path, seed: int) -> Path:

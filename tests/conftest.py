@@ -69,7 +69,7 @@ def write_blob(path: Path, size: int = 2048, seed: bytes = b"\x89PNG") -> Path:
 # --- corpora ---------------------------------------------------------------
 
 # Each corpus repeats its own domain vocabulary, the way real documents of a
-# kind do. Without that the lexical backend has nothing to go on — it matches
+# kind do. Without that the embedder has nothing to go on — it matches
 # words, not meanings.
 TAX = [
     "IRS form W-2: wage and tax statement for the tax filing year. Federal "
@@ -116,10 +116,10 @@ RECIPE = [
 
 @pytest.fixture
 def embedder():
-    """The default backend, shared across tests: loading it is cached."""
+    """The default embedder, shared across tests: loading it is cached."""
     from messie.embed import get_embedder
 
-    return get_embedder("wordllama")
+    return get_embedder()
 
 
 @pytest.fixture
@@ -210,39 +210,14 @@ def snapshot(root: Path) -> dict[str, tuple[int, float]]:
 # These lived in three test modules apiece. conftest is already on the import
 # path for every test file, so this is where one copy belongs.
 
-#: Backends that compare meaning, best first. One, since model2vec and
-#: sentence-transformers were measured and dropped — see messie/embed. The list
-#: and the parametrisation around it are kept so that adding a candidate
-#: backend means adding a name here, not rebuilding the test suite.
-SEMANTIC_BACKENDS = ["wordllama"]
-
-
-def backend_or_skip(name: str):
-    """The named backend, or skip the test if it is not installed."""
+def embedder_or_skip():
+    """The default embedder, or a skip when the installation is incomplete."""
     from messie.embed import get_embedder
 
     try:
-        return get_embedder(name)
+        return get_embedder()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"{name} unavailable: {exc}")
-
-
-def installed(names: list[str]) -> list[str]:
-    """Which of ``names`` can actually be loaded.
-
-    Resolved once at collection so absent backends do not litter a run with
-    hundreds of skipped parametrisations.
-    """
-    from messie.embed import get_embedder
-
-    out = []
-    for name in names:
-        try:
-            get_embedder(name)
-        except Exception:  # noqa: BLE001
-            continue
-        out.append(name)
-    return out
+        pytest.skip(f"embedder unavailable: {exc}")
 
 
 def codes(analysis) -> set[str]:

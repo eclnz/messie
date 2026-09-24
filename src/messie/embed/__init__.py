@@ -1,4 +1,4 @@
-"""Local text embedding backends."""
+"""The default embedder and shared embedding helpers."""
 
 from __future__ import annotations
 
@@ -6,8 +6,6 @@ from functools import cache
 from typing import Protocol, runtime_checkable
 
 import numpy as np
-
-BACKEND_ORDER: tuple[str, ...] = ("wordllama",)
 
 
 @runtime_checkable
@@ -21,8 +19,8 @@ class Embedder(Protocol):
         ...
 
 
-class BackendUnavailable(RuntimeError):
-    """Raised when a backend's dependencies or model are not present."""
+class EmbedderUnavailable(RuntimeError):
+    """Raised when the default embedder cannot be loaded."""
 
 
 def normalise(vectors: np.ndarray) -> np.ndarray:
@@ -45,44 +43,15 @@ def encode_nonblank(texts: list[str], encode_fn, dim: int) -> np.ndarray:
     wanted = [i for i, t in enumerate(texts) if t.strip()]
     if wanted:
         encoded = np.asarray(encode_fn([encodable(texts[i]) for i in wanted]), dtype=np.float32)
-        if encoded.shape[1] != dim:  # backend reported a different width
+        if encoded.shape[1] != dim:
             out = np.zeros((len(texts), encoded.shape[1]), dtype=np.float32)
         out[wanted] = np.nan_to_num(encoded, nan=0.0, posinf=0.0, neginf=0.0)
     return normalise(out)
 
 
 @cache
-def _load(name: str) -> Embedder:
-    """Load a backend, once. Inference is stateless, so sharing is safe."""
-    if name == "wordllama":
-        from messie.embed.wordllama_backend import WordLlamaEmbedder
+def get_embedder() -> Embedder:
+    """Load the embedder used when a caller does not supply one."""
+    from messie.embed.wordllama import WordLlamaEmbedder
 
-        return WordLlamaEmbedder()
-    raise BackendUnavailable(f"unknown backend {name!r}")
-
-
-def get_embedder(preference: str | None = None) -> Embedder:
-    """Return the requested backend, or the default backend."""
-    if preference and preference != "auto":
-        return _load(preference)
-
-    errors: list[str] = []
-    for name in BACKEND_ORDER:
-        try:
-            return _load(name)
-        except Exception as exc:  # noqa: BLE001 - try the next backend
-            errors.append(f"{name}: {exc}")
-    raise BackendUnavailable("no embedding backend available: " + "; ".join(errors))
-
-
-def backend_status() -> list[tuple[str, bool, str]]:
-    """(name, available, detail) for every backend — powers ``messie doctor``."""
-    out = []
-    for name in BACKEND_ORDER:
-        try:
-            embedder = _load(name)
-            probe = embedder.encode(["a short probe sentence"])
-            out.append((name, True, f"ready, {probe.shape[1]} dims"))
-        except Exception as exc:  # noqa: BLE001
-            out.append((name, False, str(exc).split("\n")[0][:120]))
-    return out
+    return WordLlamaEmbedder()

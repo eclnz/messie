@@ -18,7 +18,7 @@ from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
 from messie.kinds import Kind, is_textual, kind_phrase
 from messie.label import file_terms, format_label, label_clusters
-from messie.metadata import describe
+from messie.binary_description import describe_binary
 from messie.result import DirAnalysis, Finding, SkipReason, Verdict
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.signals import run_all
@@ -86,7 +86,7 @@ class SignalContext:
     path: Path
     settings: Settings
     thresholds: Thresholds
-    backend: str
+    embedder: str
     files: list[FileEntry]
     texts: list[str]
     terms: list[Counter]
@@ -107,11 +107,14 @@ class SignalContext:
             self.settings.meaningful_cluster_min,
             int(self.settings.meaningful_cluster_frac * self.n_files),
         )
-        sizes = self.clustering.sizes()
-        return [cluster for cluster, size in sizes.items() if size >= floor]
+        return [
+            cluster
+            for cluster, members in enumerate(self.clustering.groups)
+            if len(members) >= floor
+        ]
 
     def members(self, cluster: int) -> list[int]:
-        return self.clustering.members(cluster).tolist()
+        return self.clustering.groups[cluster].tolist()
 
     def label_of(self, cluster: int) -> str:
         return format_label(self.cluster_labels.get(cluster, []))
@@ -171,7 +174,7 @@ def vectorize(
     files: list[FileEntry], *, embedder: Embedder, settings: Settings = DEFAULT_SETTINGS
 ) -> VectorRecord:
     """Turn scanned files into the evidence needed by signals."""
-    texts = [extract_text(file, settings) or describe(file) for file in files]
+    texts = [extract_text(file, settings) or describe_binary(file, settings) for file in files]
     names = _name_phrases(files)
     text_vectors = embedder.encode(texts)
     name_vectors = embedder.encode(names)
@@ -221,7 +224,7 @@ def analyze(
     if len(contents.files) < settings.min_files_to_judge:
         return DirAnalysis(
             path=contents.path,
-            backend=embedder.name,
+            embedder=embedder.name,
             n_files=len(contents.files),
             truncated=contents.truncated,
             judged=False,
@@ -237,14 +240,14 @@ def analyze(
         path=contents.path,
         settings=settings,
         thresholds=thresholds,
-        backend=embedder.name,
+        embedder=embedder.name,
         files=list(contents.files),
         texts=record.texts,
         terms=record.terms,
         vectors=record.vectors,
         topical=record.topical,
         clustering=clustering,
-        cluster_labels=label_clusters(clustering.labels, record.terms, clustering.n_clusters),
+        cluster_labels=label_clusters(clustering.labels, record.terms, len(clustering.groups)),
         child_profiles=child_profiles or {},
         subdirs=list(contents.subdirs),
         truncated=contents.truncated,
@@ -253,10 +256,10 @@ def analyze(
     score, verdict = _score_findings(signal_run.findings, settings)
     return DirAnalysis(
         path=context.path,
-        backend=context.backend,
+        embedder=context.embedder,
         n_files=context.n_files,
         truncated=context.truncated,
-        clusters=clustering.n_clusters,
+        clusters=len(clustering.groups),
         meaningful_clusters=len(context.meaningful_clusters()),
         findings=signal_run.findings,
         failed_signals=signal_run.failed,

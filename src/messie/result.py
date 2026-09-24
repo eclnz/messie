@@ -48,7 +48,7 @@ class DirAnalysis:
     """The reportable verdict for one folder."""
 
     path: Path
-    backend: str
+    embedder: str
     n_files: int
     truncated: int = 0
     clusters: int = 0

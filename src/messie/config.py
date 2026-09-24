@@ -96,7 +96,7 @@ class Settings:
 
 @dataclass(frozen=True)
 class Thresholds:
-    """Absolute similarity cut-offs, resolved against a backend's scale."""
+    """Absolute similarity cut-offs, resolved against an embedder's scale."""
 
     scale: float
     cluster: float
@@ -108,7 +108,7 @@ class Thresholds:
     def derive(
         cls, scale: float, settings: Settings, override: float | None = None
     ) -> Thresholds:
-        """Cut-offs for a backend whose same-topic similarity sits near ``scale``.
+        """Cut-offs for an embedder whose same-topic similarity sits near ``scale``.
         """
         cluster = override if override is not None else scale * settings.cluster_rel
         ratio = cluster / (scale * settings.cluster_rel) if scale else 1.0

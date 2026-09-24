@@ -9,7 +9,7 @@ from pathlib import Path
 from messie import __version__
 from messie.analyze import analyze_tree
 from messie.config import DEFAULT_SETTINGS
-from messie.embed import BACKEND_ORDER, backend_status, get_embedder
+from messie.embed import EmbedderUnavailable, get_embedder
 from messie.report import (
     ProgressPrinter,
     RenderOptions,
@@ -43,8 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--all", dest="show_all", action="store_true",
                         help="show every folder, including the tidy ones")
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
-    parser.add_argument("--backend", default="auto", choices=("auto", *BACKEND_ORDER),
-                        help="embedding backend (default: auto, best available)")
     parser.add_argument("--threshold", type=float, default=None,
                         help="similarity below which two files count as unrelated")
     parser.add_argument("--min-verdict", default="lived-in",
@@ -58,34 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="show the walk as it happens, on stderr")
     parser.add_argument("--no-color", dest="colour", action="store_false", default=None,
                         help="disable coloured output")
-    parser.add_argument("--doctor", action="store_true",
-                        help="report which embedding backends are usable, then exit")
     parser.add_argument("--version", action="version", version=f"messie {__version__}")
     return parser
 
 
-def _doctor() -> int:
-    print(f"messie {__version__}")
-    print("\nembedding backends, best first:")
-    usable = 0
-    for name, ok, detail in backend_status():
-        mark = "✓" if ok else "·"
-        print(f"  {mark} {name:<12} {detail}")
-        usable += ok
-    if not usable:
-        print(
-            "\nNo backend is usable, so messie cannot read anything.\n"
-            "Reinstall with: pip install --force-reinstall messie\n"
-            "(wordllama ships its weights in the wheel; nothing is downloaded at runtime.)"
-        )
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-
-    if args.doctor:
-        return _doctor()
 
     try:
         min_verdict = _parse_verdict(args.min_verdict)
@@ -109,9 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         settings = settings.with_(cluster_threshold_override=args.threshold)
 
     try:
-        embedder = get_embedder(args.backend)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the user, not swallowed
-        print(f"messie: no usable embedding backend: {exc}", file=sys.stderr)
+        embedder = get_embedder()
+    except EmbedderUnavailable as exc:
+        print(f"messie: embedding unavailable: {exc}", file=sys.stderr)
         return 2
 
     # Verbose output goes to stderr throughout, so that --json -v still pipes.

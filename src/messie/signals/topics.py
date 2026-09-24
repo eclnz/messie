@@ -29,8 +29,8 @@ def _dominant_subject(analysis: SignalContext) -> np.ndarray | None:
     meaningful = analysis.meaningful_clusters()
     if clustering is None or not meaningful:
         return None
-    biggest = max(meaningful, key=lambda cid: clustering.sizes().get(cid, 0))
-    members = clustering.members(biggest)
+    biggest = max(meaningful, key=lambda cid: len(clustering.groups[cid]))
+    members = clustering.groups[biggest]
     if members.size == 0:
         return None
     return analysis.vectors[members].mean(axis=0)
@@ -48,12 +48,11 @@ def _unrelated_set(analysis: SignalContext, candidates: list[int]) -> list[int]:
     """Largest-first greedy pick of clusters that are unrelated to each other."""
     clustering = analysis.clustering
     assert clustering is not None
-    sim = clustering.link()
+    sim = clustering.group_similarity
     ceiling = analysis.thresholds.unrelated
-    sizes = clustering.sizes()
 
     chosen: list[int] = []
-    for cid in sorted(candidates, key=lambda c: -sizes.get(c, 0)):
+    for cid in sorted(candidates, key=lambda cid: -len(clustering.groups[cid])):
         if all(sim[cid, other] < ceiling for other in chosen):
             chosen.append(cid)
     return chosen
@@ -62,7 +61,7 @@ def _unrelated_set(analysis: SignalContext, candidates: list[int]) -> list[int]:
 @signal
 def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     clustering = analysis.clustering
-    if clustering is None or clustering.n_clusters < 2:
+    if clustering is None or len(clustering.groups) < 2:
         return []
 
     meaningful = analysis.meaningful_clusters()
@@ -73,12 +72,11 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     if len(chosen) < 2:
         return []
 
-    sizes = clustering.sizes()
-    covered = sum(sizes[cid] for cid in chosen)
+    covered = sum(len(clustering.groups[cid]) for cid in chosen)
     coverage = covered / max(1, analysis.n_files)
 
     # More separation produces stronger evidence.
-    sim = clustering.link()
+    sim = clustering.group_similarity
     pairs = [sim[a, b] for i, a in enumerate(chosen) for b in chosen[i + 1 :]]
     separation = 1.0 - max(0.0, float(np.mean(pairs))) / max(
         1e-6, analysis.thresholds.unrelated
@@ -165,7 +163,7 @@ def unattached_files(analysis: SignalContext) -> list[Finding]:
     loners = [int(i) for i in eligible if int(clustering.labels[i]) not in meaningful]
     if len(loners) < 3:
         return []
-    loners.sort(key=lambda i: clustering.best_other[i])
+    loners.sort(key=lambda i: clustering.closest_similarity[i])
 
     subjects = len({int(clustering.labels[i]) for i in eligible if clustering.labels[i] >= 0})
     total_thread = loose >= _NO_THREAD_SHARE

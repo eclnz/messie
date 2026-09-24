@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import SEMANTIC_BACKENDS, backend_or_skip, codes, installed
+from conftest import codes, embedder_or_skip
 from corpus import ALL_TOPICS, DEV_TOPICS, EXTENSIONS, OFFICE_TOPICS, PERSONAL_TOPICS, TOPICS
 from corpus.build import (
     add_debris,
@@ -30,27 +30,16 @@ from messie.analyze import analyze_dir
 from messie.kinds import Kind
 from messie.result import Verdict
 
-#: Subjects that do not hold together even for a semantic backend, and why.
+#: Subjects that do not hold together under the default embedder, and why.
 #: Measured against the example corpus: 34 of 35 topics form a single group.
 KNOWN_WEAK = {
     "car_maintenance": "six unrelated garage jobs share little beyond the car itself",
 }
 
 
-INSTALLED_SEMANTIC = installed(SEMANTIC_BACKENDS)
-_NO_SEMANTIC = [pytest.param(None, marks=pytest.mark.skip(reason="no semantic backend"))]
-
-
-@pytest.fixture(params=INSTALLED_SEMANTIC or _NO_SEMANTIC)
-def real_embedder(request):
-    """Every backend that is installed."""
-    return backend_or_skip(request.param)
-
-
-@pytest.fixture(params=INSTALLED_SEMANTIC or _NO_SEMANTIC)
-def semantic_embedder(request):
-    """Only the backends that compare meaning rather than vocabulary."""
-    return backend_or_skip(request.param)
+@pytest.fixture
+def real_embedder():
+    return embedder_or_skip()
 
 
 # --- the corpora themselves -------------------------------------------------
@@ -86,16 +75,12 @@ def test_the_datasets_are_varied():
 #     """
 #     folder = build_coherent(tmp_path / topic, topic, 6)
 #     analysis = analyze_dir(folder, embedder=semantic_embedder)
-#     assert analysis.clustering.n_clusters == 1, (
-#         f"{topic} split into {analysis.clustering.n_clusters} groups: "
-#         f"{[analysis.label_of(c) for c in range(analysis.clustering.n_clusters)]}"
-#     )
 
 
 @pytest.mark.parametrize("topic", [t for t in ALL_TOPICS if t not in KNOWN_WEAK])
-def test_a_single_subject_folder_is_not_a_mess(topic, tmp_path, semantic_embedder):
+def test_a_single_subject_folder_is_not_a_mess(topic, tmp_path, real_embedder):
     folder = build_coherent(tmp_path / topic, topic, 6)
-    analysis = analyze_dir(folder, embedder=semantic_embedder)
+    analysis = analyze_dir(folder, embedder=real_embedder)
     assert "unrelated_topics" not in codes(analysis)
     assert "no_common_thread" not in codes(analysis)
     assert analysis.verdict < Verdict.MESSY

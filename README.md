@@ -62,7 +62,6 @@ messie ~/Downloads --all      # show tidy folders too
 messie ~/Downloads --json     # machine-readable
 messie ~/Drive -v             # watch it work, on stderr
 messie ~/Pictures -c          # also grumble about folders holding a lot of files
-messie --doctor               # which backends are available
 ```
 
 Exit status is 0 while everything is below the `--fail-over` verdict (default
@@ -93,29 +92,15 @@ Each fires with a severity, and they combine into a 0–100 score:
 A folder with fewer than six files is reported as too small to judge rather than
 being given a score.
 
-## Backends
+## Embedding
 
-There is one: `wordllama`, whose weights ship inside the wheel. The report names
-it, and `--backend` still exists so that naming one that isn't installed is an
-error rather than a silent downgrade.
+Messie uses [wordllama](https://pypi.org/project/wordllama/), whose weights
+ship inside its wheel. The command-line tool deliberately has no model choice.
 
-Three alternatives have been tried and measured away. The numbers are kept in
-`src/messie/embed/__init__.py` so nobody has to rediscover them:
-
-| backend | verdict |
-|---|---|
-| hashed TF-IDF | held 71% of subjects together against wordllama's 97%, on an older corpus. A fallback for machines that cannot download, when wordllama never downloads. |
-| `model2vec` | significantly worse (P=99.6% by bootstrap), for a speed gain on a stage that takes 25ms. |
-| `sentence` | no better at its own best threshold, and clearly worse at the strict end where messie operates: asked to keep 90% of unrelated pairs apart it holds 59% of subjects together against wordllama's 73%. Costs 30x the runtime and ~400MB of torch, and needs a download. |
-
-The last of those is the one worth dwelling on, because it was assumed to be the
-best option for a long time on the strength of being the heaviest. It is not,
-and nothing in the code would have told you so — only running it did.
-
-Thresholds are expressed as fractions of the backend's own similarity scale.
-With one backend that indirection buys nothing today; it is kept because it is
-what makes a future candidate measurable against the incumbent at all. Override
-with `--threshold`.
+Library callers can supply any object satisfying the `Embedder` protocol to
+`analyze_dir` or `analyze_tree`; that is the seam for experiments or a future
+replacement. Thresholds are relative to an embedder's similarity scale, and
+`--threshold` remains available for calibration.
 
 Every threshold constant is fitted by `scripts/calibrate.py`, which reports a
 plateau as well as a peak and refuses to recommend a value when its sample is
@@ -205,9 +190,8 @@ reporting packages for resembling their own subpackages.
 ## Limitations
 
 - **Static embeddings are coarse.** They compare subject matter, not argument.
-  Measured across the 37-subject example corpus, the backend keeps 76% of
-  single-subject folders together and 92% of unrelated pairs apart. Heavier
-  models were tried; see Backends for why none of them replaced this one.
+  Measured across the 37-subject example corpus, the embedder keeps 76% of
+  single-subject folders together and 92% of unrelated pairs apart.
 - **One mixed folder in seven goes unremarked.** `unrelated_rel` was refitted
   against real directories and moved from 0.55 to 0.25, which cut false alarms
   on coherent folders sharply and cost recall on genuinely mixed ones — 98%
@@ -225,7 +209,7 @@ reporting packages for resembling their own subpackages.
   if your sense of it differs.
 - **Scanned PDFs have no text to read.** There is no OCR.
 - **messie is built for English.** Other Latin-script languages mostly work,
-  but the backend tends to group non-English documents by language
+  but the embedder tends to group non-English documents by language
   rather than by subject, so verdicts on them are unreliable.
 
 ## Example datasets
@@ -272,7 +256,7 @@ folder holding it.
 `MESSIE_DEBUG=1` makes a signal that raises crash instead of being skipped.
 
 The test suite builds real folders on disk and runs the whole pipeline against
-the real backend. As well as the signals themselves it checks that every
+the real embedder. As well as the signals themselves it checks that every
 corpus subject is internally coherent — ground truth the other tests depend on —
 that text survives a round trip through each readable format, that every file
 type is recognised by kind, and that analysing a folder leaves every file in it

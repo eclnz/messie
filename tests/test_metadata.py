@@ -1,6 +1,6 @@
 """What a binary file says about itself.
 
-``metadata.py`` is the one module that reads bytes it did not put there, and
+``binary_description.py`` is the one module that reads bytes it did not put there, and
 the one carrying an optional dependency, so it is tested directly rather than
 only through a verdict. Two properties matter more than any particular phrase:
 
@@ -22,17 +22,18 @@ from pathlib import Path
 import pytest
 
 from messie.kinds import Kind
-from messie.metadata import (
-    _category_words,
-    _clip,
+from messie.binary_description import (
+    _image_category,
+    _phrase,
     _describe_archive,
     _describe_font,
     _describe_image,
     _gif_size,
     _jpeg_size,
     _png_size,
-    describe,
+    describe_binary,
 )
+from messie.config import DEFAULT_SETTINGS
 from messie.scan import read_dir
 
 FONT_ROOTS = ("/usr/share/fonts", "/Library/Fonts", "/System/Library/Fonts")
@@ -88,7 +89,7 @@ def test_a_wheel_is_an_archive_despite_its_extension(tmp_path):
         archive.writestr("widgets/layout.py", b"x")
 
     assert entry_for(path).kind is Kind.UNKNOWN
-    assert {"rendering", "layout"} <= set(describe(entry_for(path)).split())
+    assert {"rendering", "layout"} <= set(describe_binary(entry_for(path)).split())
 
 
 def test_a_bare_gzip_says_nothing(tmp_path):
@@ -248,13 +249,13 @@ def test_an_unreadable_image_returns_empty(tmp_path):
 
 # --- EXIF categories --------------------------------------------------------
 #
-# ``_category_words`` is a pure function of the tag dictionary, so the words it
+# ``_image_category`` is a pure function of the tag dictionary, so the words it
 # chooses are tested without needing Pillow. The end-to-end tests below need a
 # real image with real EXIF, so those ask for it.
 
 
 def test_camera_tags_say_photograph():
-    words = _category_words(
+    words = _image_category(
         {"Make": "NIKON CORPORATION", "Model": "D7000", "DateTimeOriginal": "2019:07:14 11:02:03"}
     )
     assert words[0] == "photograph"
@@ -262,25 +263,25 @@ def test_camera_tags_say_photograph():
 
 
 def test_scanner_software_says_scanned():
-    assert _category_words({"Software": "EPSON Scan 2"})[0] == "scanned"
+    assert _image_category({"Software": "EPSON Scan 2"})[0] == "scanned document"
 
 
 def test_screenshot_software_says_screenshot():
-    assert _category_words({"Software": "Screenshot"})[0] == "screenshot"
+    assert _image_category({"Software": "Screenshot"})[0] == "screenshot"
 
 
 def test_a_camera_wins_over_software():
     """Phones write both. What produced the pixels is the camera."""
     tags = {"Make": "Apple", "Model": "iPhone 13", "Software": "16.1 Screenshot-ish"}
-    assert _category_words(tags)[0] == "photograph"
+    assert _image_category(tags)[0] == "photograph"
 
 
 def test_no_tags_say_nothing():
-    assert _category_words({}) == []
+    assert _image_category({}) == []
 
 
 def test_unknown_software_is_named_without_a_category():
-    words = _category_words({"Software": "GIMP 2.10"})
+    words = _image_category({"Software": "GIMP 2.10"})
     assert words[0] == "image"
     assert "GIMP 2.10" in words
 
@@ -323,11 +324,17 @@ def test_dimensions_alone_when_there_is_no_exif(tmp_path):
 
 
 def test_repeated_words_are_said_once():
-    assert _clip(["invoice", "Invoice", "invoice", "2023"]) == "invoice 2023"
+    assert _phrase(["invoice", "Invoice", "invoice", "2023"]) == "invoice 2023"
 
 
 def test_a_description_is_capped():
-    assert len(_clip([f"word{i}" for i in range(500)]).split()) == 40
+    phrase = _phrase([f"word{i}" for i in range(500)])
+    assert len(phrase) <= 100
+    assert len(_phrase([chr(0xE000 + i) for i in range(50)]).split()) == 40
+
+
+def test_a_single_huge_value_is_not_embedded():
+    assert _phrase(["x" * 101]) == ""
 
 
 def test_an_image_description_stays_under_the_judging_floor(tmp_path):
@@ -356,6 +363,15 @@ def test_an_archive_of_thousands_of_members_is_still_short(tmp_path):
     assert len(_describe_archive(path).split()) <= 40
 
 
+def test_an_archive_over_the_read_budget_is_not_described(tmp_path):
+    path = tmp_path / "large.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("invoice.txt", b"x" * 100)
+
+    settings = DEFAULT_SETTINGS.with_(max_read_bytes=10)
+    assert describe_binary(entry_for(path), settings) == ""
+
+
 # --- dispatch ---------------------------------------------------------------
 
 
@@ -363,7 +379,7 @@ def test_a_zero_byte_file_says_nothing(tmp_path):
     for name in ("empty.zip", "empty.ttf", "empty.png"):
         (tmp_path / name).write_bytes(b"")
     for entry in read_dir(tmp_path).files:
-        assert describe(entry) == ""
+        assert describe_binary(entry) == ""
 
 
 def test_text_files_are_not_metadata_s_business(tmp_path):
@@ -372,7 +388,7 @@ def test_text_files_are_not_metadata_s_business(tmp_path):
     (tmp_path / "notes.txt").write_text("a real document with real words", encoding="utf-8")
     (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4\n")
     for entry in read_dir(tmp_path).files:
-        assert describe(entry) == ""
+        assert describe_binary(entry) == ""
 
 
 def test_describe_never_raises_on_a_file_lying_about_its_type(tmp_path):
@@ -382,4 +398,4 @@ def test_describe_never_raises_on_a_file_lying_about_its_type(tmp_path):
     (tmp_path / "actually_font.png").write_bytes(b"\x00\x01\x00\x00" + b"\x00" * 60)
 
     for entry in read_dir(tmp_path).files:
-        assert isinstance(describe(entry), str)
+        assert isinstance(describe_binary(entry), str)

@@ -6,18 +6,15 @@ The first test here is the one that matters: the case the tool was built for.
 from __future__ import annotations
 
 import pytest
-from conftest import SEMANTIC_BACKENDS, backend_or_skip, snapshot, write_blob, write_docx
+from conftest import embedder_or_skip, snapshot, write_blob, write_docx
 
 from messie.analyze import analyze_dir, analyze_tree
 from messie.scan import read_dir
 from messie.result import Verdict
 
-BACKENDS = SEMANTIC_BACKENDS
-
-
-@pytest.fixture(params=BACKENDS)
-def real_embedder(request):
-    return backend_or_skip(request.param)
+@pytest.fixture
+def real_embedder():
+    return embedder_or_skip()
 
 
 def test_uniform_file_type_unrelated_contents_is_a_mess(mixed_docx_dir, real_embedder):
@@ -41,8 +38,7 @@ def test_uniform_file_type_coherent_contents_is_tidy(coherent_docx_dir, real_emb
 
     assert analysis.verdict == Verdict.TIDY
     assert analysis.findings == []
-    # How finely it subdivides is backend-dependent and covered by
-    # test_datasets.py; what matters here is that nothing is reported.
+    # The exact grouping belongs to the dataset tests; this only cares that it is quiet.
 
 
 def test_photo_album_is_tidy(tmp_path, real_embedder):

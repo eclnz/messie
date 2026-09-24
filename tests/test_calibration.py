@@ -7,7 +7,7 @@ proved nothing. They are now derived from the example corpus by
 away from what that derivation produces, or if the corpus stops being
 separable in the first place.
 
-Without this, the numbers in ``wordllama_backend.py`` would slowly go back to
+Without this, the numbers in ``wordllama.py`` would slowly go back to
 being magic.
 """
 
@@ -27,12 +27,9 @@ from calibrate import (  # noqa: E402
     sweep_threshold,
     sweep_unrelated,
 )
-from conftest import backend_or_skip  # noqa: E402
+from conftest import embedder_or_skip  # noqa: E402
 
 from messie.config import DEFAULT_SETTINGS, Thresholds  # noqa: E402
-from messie.embed import BACKEND_ORDER  # noqa: E402
-
-BACKEND = "wordllama"
 
 #: How far the shipped scale may sit from the measured optimum. Wide enough
 #: that a corpus tweak does not fail the build, narrow enough that a real
@@ -43,14 +40,14 @@ pytest.skip("Skipping this test file", allow_module_level=True)
 
 @pytest.fixture(scope="module")
 def separation():
-    backend_or_skip(BACKEND)
-    return measure_separation(BACKEND)
+    embedder_or_skip()
+    return measure_separation()
 
 
 @pytest.fixture(scope="module")
 def sweep():
-    backend_or_skip(BACKEND)
-    return sweep_threshold(BACKEND, pairs=60)
+    embedder_or_skip()
+    return sweep_threshold(pairs=60)
 
 
 # --- the corpus has to be separable at all ---------------------------------
@@ -58,7 +55,7 @@ def sweep():
 
 def test_every_subject_holds_together_above_the_threshold(separation):
     """The weakest subject must still be tighter than the clustering cut-off."""
-    embedder = backend_or_skip(BACKEND)
+    embedder = embedder_or_skip()
     thresholds = Thresholds.derive(embedder.scale, DEFAULT_SETTINGS)
     assert separation.intra_min > thresholds.cluster
 
@@ -94,8 +91,8 @@ def test_the_closest_pair_is_a_known_neighbour(separation):
 def test_shipped_scale_matches_the_measured_optimum(sweep):
     drift = abs(sweep.shipped_scale - sweep.best.scale)
     assert drift <= SCALE_TOLERANCE, (
-        f"{BACKEND} ships scale {sweep.shipped_scale} but the corpus says "
-        f"{sweep.best.scale}. Re-run scripts/calibrate.py and update the backend."
+        f"the default embedder ships scale {sweep.shipped_scale} but the corpus says "
+        f"{sweep.best.scale}. Re-run scripts/calibrate.py and update the calibration."
     )
 
 
@@ -109,7 +106,7 @@ def test_the_shipped_threshold_performs(sweep):
     (76% and 92%), which is what the assertion was always meant to be: a guard
     against regression, not a target nothing has to hit.
     """
-    embedder = backend_or_skip(BACKEND)
+    embedder = embedder_or_skip()
     shipped = Thresholds.derive(embedder.scale, DEFAULT_SETTINGS).cluster
     nearest = min(sweep.points, key=lambda p: abs(p.threshold - shipped))
     assert nearest.subjects_held >= 0.70
@@ -124,10 +121,9 @@ def test_the_sweep_has_a_real_peak(sweep):
     assert best - worst > 0.25
 
 
-@pytest.mark.parametrize("backend", BACKEND_ORDER)
-def test_every_backend_declares_a_scale(backend):
+def test_default_embedder_declares_a_scale():
     """Thresholds are fractions of this, so a missing scale is silently wrong."""
-    embedder = backend_or_skip(backend)
+    embedder = embedder_or_skip()
     assert 0.05 < embedder.scale < 1.0
 
 
@@ -142,8 +138,8 @@ def test_every_backend_declares_a_scale(backend):
 
 @pytest.fixture(scope="module")
 def unrelated_sweep():
-    backend_or_skip(BACKEND)
-    return sweep_unrelated(BACKEND, pairs=40, limit=250)
+    embedder_or_skip()
+    return sweep_unrelated(pairs=40, limit=250)
 
 
 def test_unrelated_rel_sits_above_its_measured_plateau_on_purpose(unrelated_sweep):
@@ -211,8 +207,8 @@ def test_misfiled_margin_is_still_known_to_be_unmeasurable():
     ever starts passing as conclusive, the constant should finally be fitted —
     which is a good failure to get.
     """
-    backend_or_skip(BACKEND)
-    report = sweep_misfiled(BACKEND, limit=250)
+    embedder_or_skip()
+    report = sweep_misfiled(limit=250)
     assert report.inconclusive, (
         "the misfiled sweep now has enough negatives to be conclusive "
         f"({report.negatives}); fit misfiled_margin_rel and update config.py"

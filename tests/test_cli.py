@@ -21,7 +21,7 @@ def run(argv, capsys):
 
 
 def test_reports_a_mess_and_exits_one(messy_tree, capsys):
-    code, out = run([str(messy_tree), "--no-color", "--backend", "wordllama"], capsys)
+    code, out = run([str(messy_tree), "--no-color"], capsys)
     assert code == 1
     assert "unrelated" in out.lower()
 
@@ -30,13 +30,13 @@ def test_tidy_folder_exits_zero(tmp_path, capsys):
     folder = tmp_path / "album"
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
-    code, out = run([str(folder), "--no-color", "--backend", "wordllama"], capsys)
+    code, out = run([str(folder), "--no-color"], capsys)
     assert code == 0
     assert "No mess found" in out
 
 
 def test_json_output_is_valid_and_complete(messy_tree, capsys):
-    code, out = run([str(messy_tree), "--json", "--backend", "wordllama"], capsys)
+    code, out = run([str(messy_tree), "--json"], capsys)
     payload = json.loads(out)
 
     assert payload["root"] == str(messy_tree.resolve())
@@ -49,35 +49,28 @@ def test_json_output_is_valid_and_complete(messy_tree, capsys):
 
 def test_fail_over_threshold_is_respected(messy_tree, capsys):
     code, _ = run(
-        [str(messy_tree), "--no-color", "--backend", "wordllama", "--fail-over", "chaotic"],
+        [str(messy_tree), "--no-color", "--fail-over", "chaotic"],
         capsys,
     )
     assert code in (0, 1)
     quiet, _ = run(
-        [str(messy_tree), "--no-color", "--backend", "wordllama", "--fail-over", "tidy"],
+        [str(messy_tree), "--no-color", "--fail-over", "tidy"],
         capsys,
     )
     assert quiet == 1
 
 
 def test_missing_folder_is_an_error(tmp_path, capsys):
-    assert main([str(tmp_path / "nope"), "--backend", "wordllama"]) == 2
+    assert main([str(tmp_path / "nope")]) == 2
 
 
 def test_bad_verdict_name_is_an_error(tmp_path, capsys):
     assert main([str(tmp_path), "--min-verdict", "spotless"]) == 2
 
 
-def test_doctor_lists_backends(capsys):
-    code, out = run(["--doctor"], capsys)
-    assert code == 0
-    assert "wordllama" in out
-    assert "backends" in out.lower()
-
-
 def test_cli_changes_nothing_on_disk(messy_tree, capsys):
     before = snapshot(messy_tree)
-    run([str(messy_tree), "--no-color", "--backend", "wordllama"], capsys)
+    run([str(messy_tree), "--no-color"], capsys)
     assert snapshot(messy_tree) == before
 
 
@@ -85,16 +78,18 @@ def test_all_flag_shows_tidy_folders(tmp_path, capsys):
     folder = tmp_path / "album"
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
-    _, out = run([str(folder), "--all", "--no-color", "--backend", "wordllama"], capsys)
+    _, out = run([str(folder), "--all", "--no-color"], capsys)
     assert "TIDY" in out
 
 
-def test_explicit_backend_that_is_missing_fails_loudly(tmp_path, capsys, monkeypatch):
-    """Asking for a backend and silently getting a weaker one would be a lie."""
-    import messie.embed as embed
+def test_unavailable_embedder_is_an_error(tmp_path, capsys, monkeypatch):
+    from messie.embed import EmbedderUnavailable
 
-    monkeypatch.setattr(embed, "_load", lambda name: (_ for _ in ()).throw(RuntimeError("nope")))
-    assert main([str(tmp_path), "--backend", "wordllama"]) == 2
+    def unavailable():
+        raise EmbedderUnavailable("broken install")
+
+    monkeypatch.setattr("messie.cli.get_embedder", unavailable)
+    assert main([str(tmp_path)]) == 2
 
 
 # --- --verbose --------------------------------------------------------------
@@ -108,10 +103,10 @@ def test_explicit_backend_that_is_missing_fails_loudly(tmp_path, capsys, monkeyp
 def test_verbose_writes_nothing_to_stdout(messy_tree, capsys):
     """Progress belongs on stderr. If it leaks into stdout, every pipeline
     built on messie breaks the day someone adds -v to it."""
-    main([str(messy_tree), "--no-color", "--backend", "wordllama"])
+    main([str(messy_tree), "--no-color"])
     plain = capsys.readouterr().out
 
-    main([str(messy_tree), "--no-color", "--backend", "wordllama", "-v"])
+    main([str(messy_tree), "--no-color", "-v"])
     captured = capsys.readouterr()
 
     assert captured.out == plain
@@ -119,7 +114,7 @@ def test_verbose_writes_nothing_to_stdout(messy_tree, capsys):
 
 
 def test_verbose_json_still_parses(messy_tree, capsys):
-    code = main([str(messy_tree), "--json", "--backend", "wordllama", "--verbose"])
+    code = main([str(messy_tree), "--json", "--verbose"])
     captured = capsys.readouterr()
     assert code in (0, 1)
     payload = json.loads(captured.out)
@@ -127,7 +122,7 @@ def test_verbose_json_still_parses(messy_tree, capsys):
 
 
 def test_verbose_names_every_stage_and_the_cost(messy_tree, capsys):
-    main([str(messy_tree), "--no-color", "--backend", "wordllama", "-v"])
+    main([str(messy_tree), "--no-color", "-v"])
     err = capsys.readouterr().err
 
     for stage in ("scanning", "reading", "judging"):

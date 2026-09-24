@@ -109,7 +109,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
         colour,
     )
     score = f"{analysis.score:g}/100"
-    meta = _paint(f"{analysis.n_files} files · {analysis.backend}", _DIM, colour)
+    meta = _paint(f"{analysis.n_files} files · {analysis.embedder}", _DIM, colour)
     lines.append(f"{_paint(_fit(title, 52), _BOLD, colour)} {badge}  {score}   {meta}")
 
     if not analysis.findings:
@@ -200,7 +200,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
         "skip_reason": analysis.skip_reason.value if analysis.skip_reason else None,
         "files": analysis.n_files,
         "truncated": analysis.truncated,
-        "backend": analysis.backend,
+        "embedder": analysis.embedder,
         "score": analysis.score,
         "verdict": _VERDICT_LABELS[analysis.verdict],
         "clusters": analysis.clusters,

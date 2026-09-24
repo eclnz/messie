@@ -3,7 +3,7 @@
 
 Every structural bug in messie so far was found by printing numbers: comparing
 normalised centroids inflated similarity and welded unrelated subjects
-together; both backend scales were guessed from a four-document probe and were
+together; the embedder scale was guessed from a four-document probe and was
 badly wrong; a CSV saved as .txt read as gibberish because extraction was
 discarding line breaks. None of that was visible in the code. All of it was
 obvious in a table.
@@ -11,15 +11,15 @@ obvious in a table.
 Those measurements used to be throwaway scripts. This is them made permanent,
 so the constants in the source have a derivation anyone can re-run:
 
-    python scripts/calibrate.py                 # everything, default backend
+    python scripts/calibrate.py                 # everything, default embedder
     python scripts/calibrate.py --sections unrelated,misfiled
     python scripts/calibrate.py --json          # for machines
 
 Sections:
 
-    separation   how far apart the corpus subjects are, per backend
+    separation   how far apart the corpus subjects are
     sweep        which clustering threshold best separates them, and the
-                 backend scale that threshold implies
+                 embedder scale that threshold implies
     unrelated    where to put ``unrelated_rel``: the point at which two groups
                  stop being two facets of one subject and start being two
                  subjects sharing a folder
@@ -72,7 +72,7 @@ from messie.result import Verdict  # noqa: E402
 
 @dataclass
 class Separation:
-    backend: str
+    embedder: str
     intra_min: float
     intra_median: float
     inter_median: float
@@ -104,7 +104,7 @@ class RealWorld:
 
 @dataclass
 class Sweep:
-    backend: str
+    embedder: str
     shipped_scale: float
     best: SweepPoint
     points: list[SweepPoint]
@@ -133,7 +133,7 @@ MIN_NEGATIVES = 20
 @dataclass
 class RatioSweep:
     name: str
-    backend: str
+    embedder: str
     shipped: float
     best: RatioPoint
     plateau: tuple[float, float]
@@ -156,9 +156,9 @@ class RatioSweep:
 # --- measurement -----------------------------------------------------------
 
 
-def measure_separation(backend: str, top: int = 6) -> Separation:
+def measure_separation(top: int = 6) -> Separation:
     """Average-link similarity within each subject, and between every pair."""
-    embedder = get_embedder(backend)
+    embedder = get_embedder()
     labels, texts = [], []
     for topic, entries in TOPICS.items():
         for stem, text in entries:
@@ -181,7 +181,7 @@ def measure_separation(backend: str, top: int = 6) -> Separation:
     values = [v for v, _, _ in inter]
 
     return Separation(
-        backend=backend,
+        embedder=embedder.name,
         intra_min=min(intra.values()),
         intra_median=statistics.median(intra.values()),
         inter_median=statistics.median(values),
@@ -191,9 +191,7 @@ def measure_separation(backend: str, top: int = 6) -> Separation:
     )
 
 
-def sweep_threshold(
-    backend: str, *, pairs: int = 90, topics: int = 0, seed: int = 4
-) -> Sweep:
+def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep:
     """Which clustering threshold best tells the corpus subjects apart.
 
     Two things are traded off. Too low and every subject stays whole but
@@ -201,7 +199,7 @@ def sweep_threshold(
     subjects shatter. The sum of the two rates is maximised at the crossover.
     """
     chosen = list(ALL_TOPICS)[:topics] if topics else list(ALL_TOPICS)
-    embedder = get_embedder(backend)
+    embedder = get_embedder()
     tmp = Path(tempfile.mkdtemp(prefix="messie-calibrate-"))
 
     single = {}
@@ -222,13 +220,13 @@ def sweep_threshold(
 
     points = []
     for threshold in np.arange(0.10, 0.50, 0.01):
-        held = sum(1 for v in single.values() if cluster_vectors(v, threshold).n_clusters == 1)
+        held = sum(1 for v in single.values() if len(cluster_vectors(v, threshold).groups) == 1)
         apart = 0
         for vectors, origin in both.values():
             clustering = cluster_vectors(vectors, threshold)
             merged = any(
-                len(set(origin[clustering.members(cid)])) > 1
-                for cid in range(clustering.n_clusters)
+                len(set(origin[members])) > 1
+                for members in clustering.groups
             )
             apart += not merged
         points.append(
@@ -241,8 +239,8 @@ def sweep_threshold(
         )
 
     return Sweep(
-        backend=backend,
-        shipped_scale=float(get_embedder(backend).scale),
+        embedder=embedder.name,
+        shipped_scale=float(embedder.scale),
         best=max(points, key=lambda p: p.total),
         points=points,
     )
@@ -299,7 +297,7 @@ def _plateau_of(points: list[RatioPoint], npos: int, nneg: int) -> tuple[float, 
     return (round(ordered[i], 3), round(ordered[j], 3))
 
 
-def _summarise(name: str, backend: str, shipped: float, rows, npos: int, nneg: int) -> RatioSweep:
+def _summarise(name: str, embedder: str, shipped: float, rows, npos: int, nneg: int) -> RatioSweep:
     points = [
         RatioPoint(ratio=round(float(r), 3), caught=round(c, 3), false_alarms=round(f, 3))
         for r, c, f in rows
@@ -307,7 +305,7 @@ def _summarise(name: str, backend: str, shipped: float, rows, npos: int, nneg: i
     plateau = _plateau_of(points, npos, nneg)
     return RatioSweep(
         name=name,
-        backend=backend,
+        embedder=embedder,
         shipped=shipped,
         best=max(points, key=lambda p: p.total),
         plateau=plateau,
@@ -322,9 +320,7 @@ def _fires(analysis, code: str) -> bool:
     return any(f.code == code for f in analysis.findings)
 
 
-def sweep_unrelated(
-    backend: str, *, pairs: int = 60, seed: int = 4, limit: int = 400
-) -> RatioSweep:
+def sweep_unrelated(*, pairs: int = 60, seed: int = 4, limit: int = 400) -> RatioSweep:
     """Where two groups stop being one subject and start being two.
 
     ``unrelated_rel`` is the ceiling on the similarity between two cluster
@@ -358,7 +354,7 @@ def sweep_unrelated(
     a rate over the handful that come out of 90 folders can only ever read 0%,
     50% or 100% — precise-looking numbers with no information in them.
     """
-    embedder = get_embedder(backend)
+    embedder = get_embedder()
     topics = list(ALL_TOPICS)
     tmp = Path(tempfile.mkdtemp(prefix="messie-unrelated-"))
     should_fire = []
@@ -406,7 +402,7 @@ def sweep_unrelated(
 
     return _summarise(
         "unrelated_rel",
-        backend,
+        embedder.name,
         DEFAULT_SETTINGS.unrelated_rel,
         rows,
         len(should_fire),
@@ -414,7 +410,7 @@ def sweep_unrelated(
     )
 
 
-def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSweep:
+def sweep_misfiled(*, depth: int = 3, limit: int = 400) -> RatioSweep:
     """How much better a subfolder must fit a file before we say so.
 
     ``misfiled_margin_rel`` is that margin: a loose file is only called
@@ -436,7 +432,7 @@ def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSw
     """
     from corpus.build import build_nested_misfile
 
-    embedder = get_embedder(backend)
+    embedder = get_embedder()
     tmp = Path(tempfile.mkdtemp(prefix="messie-misfiled-"))
 
     def prepare(root: Path):
@@ -508,7 +504,7 @@ def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSw
 
     return _summarise(
         "misfiled_margin_rel",
-        backend,
+        embedder.name,
         DEFAULT_SETTINGS.misfiled_margin_rel,
         rows,
         len(positives),
@@ -556,7 +552,7 @@ def measure_real_world(limit: int = 90) -> RealWorld:
 
 
 def _print_separation(report: Separation) -> None:
-    print(f"\nSEPARATION · {report.backend}")
+    print(f"\nSEPARATION · {report.embedder}")
     print(f"  within a subject   min {report.intra_min:.3f}   median {report.intra_median:.3f}")
     print(
         f"  between subjects   median {report.inter_median:.3f}   "
@@ -568,7 +564,7 @@ def _print_separation(report: Separation) -> None:
 
 
 def _print_sweep(report: Sweep) -> None:
-    print(f"\nTHRESHOLD SWEEP · {report.backend}")
+    print(f"\nTHRESHOLD SWEEP · {report.embedder}")
     print(f"  {'thresh':>7} {'scale':>7} {'subjects held':>15} {'pairs apart':>13}")
     shown = {0.14, 0.18, 0.22, 0.26, 0.30, 0.34, 0.38, 0.42}
     for point in report.points:
@@ -584,11 +580,11 @@ def _print_sweep(report: Sweep) -> None:
     )
     print(f"  shipped scale  {report.shipped_scale:.2f}", end="")
     drift = abs(report.shipped_scale - best.scale)
-    print("   ok" if drift <= 0.06 else f"   DRIFTED by {drift:.2f} — update the backend")
+    print("   ok" if drift <= 0.06 else f"   DRIFTED by {drift:.2f} — update WordLlama")
 
 
 def _print_ratio(report: RatioSweep) -> None:
-    print(f"\n{report.name.upper()} · {report.backend}")
+    print(f"\n{report.name.upper()} · {report.embedder}")
     print(
         f"  {report.positives} cases that should fire, "
         f"{report.negatives} at risk of a false alarm"
@@ -637,7 +633,6 @@ def _print_real_world(report: RealWorld) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", default="wordllama")
     parser.add_argument(
         "--sections", default="separation,sweep,realworld",
         help="comma-separated subset to run",
@@ -650,13 +645,13 @@ def main(argv: list[str] | None = None) -> int:
     out: dict[str, Separation | Sweep | RatioSweep | RealWorld] = {}
 
     if "separation" in wanted:
-        out["separation"] = measure_separation(args.backend)
+        out["separation"] = measure_separation()
     if "sweep" in wanted:
-        out["sweep"] = sweep_threshold(args.backend, pairs=args.pairs)
+        out["sweep"] = sweep_threshold(pairs=args.pairs)
     if "unrelated" in wanted:
-        out["unrelated"] = sweep_unrelated(args.backend, pairs=min(args.pairs, 60))
+        out["unrelated"] = sweep_unrelated(pairs=min(args.pairs, 60))
     if "misfiled" in wanted:
-        out["misfiled"] = sweep_misfiled(args.backend)
+        out["misfiled"] = sweep_misfiled()
     if "realworld" in wanted:
         out["realworld"] = measure_real_world()
 

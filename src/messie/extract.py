@@ -191,8 +191,8 @@ def extract_text(entry: FileEntry, settings: Settings = DEFAULT_SETTINGS) -> str
     """The prose inside a file, or "" if there is none to be had.
 
     Files with no prose in them — photographs, archives, fonts — are not this
-    function's business. ``messie.metadata`` reads what their container says
-    instead, and ``engine._text_for`` is where the two are combined.
+    function's business. ``binary_description`` supplies a short fallback for
+    them, and analysis combines the two.
     """
     if entry.size == 0 or not is_textual(entry.kind):
         return ""
