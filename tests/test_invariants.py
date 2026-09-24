@@ -278,3 +278,26 @@ def test_analysis_of_the_repo_itself(embedder):
     analysis = analyze_dir(here, embedder=embedder)
     assert analysis.failed_signals == []
     assert os.path.isdir(here)
+
+
+def test_text_that_half_decodes_does_not_crash_the_model(tmp_path):
+    """Undecodable bytes must survive as far as the embedder without killing it.
+
+    messie reads with ``surrogateescape`` so that a file of mixed encodings
+    round-trips rather than throwing. The lone surrogates that leaves are
+    rejected outright by the Rust tokenizer underneath wordllama, which turned
+    a slightly odd binary into a crashed run: CPython's own
+    ``test/archivetestdata/testtar.tar`` did it, so any scan of a stock Python
+    installation hit it.
+    """
+    from messie.analyze import analyze_dir
+
+    folder = tmp_path / "mixed"
+    folder.mkdir()
+    for i in range(6):
+        (folder / f"note_{i}.txt").write_text(f"gardening notes about compost {i}")
+    # Exactly what surrogateescape produces from undecodable Latin-1 bytes.
+    (folder / "odd.bin").write_bytes(b"umlauts \xc4\xd6\xdc\xe4\xf6\xfc\xdf longname")
+
+    analysis = analyze_dir(folder)
+    assert analysis.judged

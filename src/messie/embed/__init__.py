@@ -70,6 +70,27 @@ def normalise(vectors: np.ndarray) -> np.ndarray:
     return vectors / np.where(norms == 0, 1.0, norms)
 
 
+def encodable(text: str) -> str:
+    """Strip characters no tokenizer will accept.
+
+    Text read off a real disk is not guaranteed to be valid Unicode. messie
+    decodes with ``surrogateescape``, which is the right choice — it makes
+    undecodable bytes round-trip instead of throwing — but it leaves lone
+    surrogates in the string, and a tokenizer backed by Rust rejects those
+    outright rather than substituting anything.
+
+    The result was a hard crash, not a bad verdict: ``TypeError:
+    TextEncodeInput must be ...`` from inside the model, on any tree containing
+    a binary that half-decodes. CPython's own test suite ships one
+    (``test/archivetestdata/testtar.tar``, whose umlaut filenames survive as
+    escaped surrogate pairs), so this fired on a stock Python install.
+
+    Guarded here rather than at extraction because it is a property of what
+    models accept, not of what files contain, and every backend needs it.
+    """
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
 def encode_nonblank(texts: list[str], encode_fn, dim: int) -> np.ndarray:
     """Run ``encode_fn`` over the non-blank texts, leaving blanks as zero rows.
 
@@ -80,7 +101,7 @@ def encode_nonblank(texts: list[str], encode_fn, dim: int) -> np.ndarray:
     out = np.zeros((len(texts), dim), dtype=np.float32)
     wanted = [i for i, t in enumerate(texts) if t.strip()]
     if wanted:
-        encoded = np.asarray(encode_fn([texts[i] for i in wanted]), dtype=np.float32)
+        encoded = np.asarray(encode_fn([encodable(texts[i]) for i in wanted]), dtype=np.float32)
         if encoded.shape[1] != dim:  # backend reported a different width
             out = np.zeros((len(texts), encoded.shape[1]), dtype=np.float32)
         out[wanted] = np.nan_to_num(encoded, nan=0.0, posinf=0.0, neginf=0.0)

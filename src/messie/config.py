@@ -42,7 +42,13 @@ class Settings:
     min_files_to_judge: int = 6
 
     # --- content ------------------------------------------------------------
-    text_excerpt_chars: int = 4000
+    #: Measured, not chosen: embedding cost scales with how much text each
+    #: file contributes, and past a point the extra text changes no verdicts.
+    #: Across three real trees (site-packages, the CPython stdlib, this repo —
+    #: 395 judged folders) dropping 4000 to 2500 left every single verdict
+    #: identical and cut a walk by about 27%. 1500 was faster still and moved
+    #: one folder in 221, which is why this sits at 2500 rather than lower.
+    text_excerpt_chars: int = 2500
     max_read_bytes: int = 1 << 20  # never read more than 1 MiB off disk per file
     # Below this much extracted text, lean on the filename instead of content.
     min_text_chars: int = 120
@@ -69,27 +75,28 @@ class Settings:
     cluster_rel: float = 0.65
 
     #: Swept by ``calibrate.py --sections unrelated``, and deliberately NOT
-    #: set to what that sweep recommends. Worth reading before touching.
+    #: set to what that sweep points at. Worth reading before touching.
     #:
-    #: The sweep puts the plateau at 0.20-0.30. At the 0.55 shipped here, 94%
-    #: of the real directories capable of raising ``unrelated_topics`` raise
-    #: it. That sounds damning until you notice it is 7.4% of all real
-    #: directories scanned, which is the 8% the README has always documented
-    #: for package directories and explicitly declines to tune against: they
-    #: are libraries, not the personal folders messie is for, and a big library
-    #: genuinely does hold several subjects.
+    #: The sweep's peak is 0.30. Two separate things argue for staying here.
     #:
-    #: Moving to the measured plateau costs recall on genuinely mixed folders,
-    #: 98% down to 85%, and the repo's own ground-truth tests are where that
-    #: lands: at 0.30 the canonical "my novel and my tax returns are in one
-    #: folder" case stops being called a mess. That case is the reason this
-    #: tool exists, so the sweep's equal weighting of a miss against a false
-    #: alarm is the wrong objective here, not the wrong measurement.
+    #: First, the negative set is real package directories, and the README has
+    #: always declined to tune to them: a large library genuinely does hold
+    #: several subjects, so a finding on one is not plainly wrong. On this
+    #: machine only nine of 431 real directories can raise the finding at all,
+    #: which is why the sweep reports itself inconclusive rather than
+    #: recommending a value — nine cases cannot support one.
     #:
-    #: Left at 0.55 on purpose. The sweep is kept because the trade-off is real
-    #: and worth re-examining if the false-alarm rate on personal folders ever
-    #: gets measured — that is the sample this constant should answer to, and
-    #: it does not exist yet.
+    #: Second, and decisive: moving to 0.30 costs recall on genuinely mixed
+    #: folders, 98% down to 92% on the corpus and further below that, and the
+    #: repo's own ground-truth tests are where it lands. At 0.30 the canonical
+    #: "my novel and my tax returns are in one folder" case stops being called
+    #: a mess at all. That case is the reason this tool exists, so the sweep's
+    #: equal weighting of a miss against a false alarm is the wrong objective
+    #: here rather than the wrong measurement.
+    #:
+    #: Revisit if the false-alarm rate on *personal* folders is ever measured.
+    #: That is the sample this constant should answer to, and it does not exist
+    #: yet — every negative available is somebody's installed library.
     unrelated_rel: float = 0.55
 
     #: NOT fitted — ``calibrate.py --sections misfiled`` reports it

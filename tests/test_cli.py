@@ -95,3 +95,73 @@ def test_explicit_backend_that_is_missing_fails_loudly(tmp_path, capsys, monkeyp
 
     monkeypatch.setattr(embed, "_load", lambda name: (_ for _ in ()).throw(RuntimeError("nope")))
     assert main([str(tmp_path), "--backend", "wordllama"]) == 2
+
+
+# --- --verbose --------------------------------------------------------------
+#
+# The whole point of the flag is watching a long run, so what these guard is
+# that it stays out of the way of everything else: stdout unchanged, JSON still
+# parseable, and the folder named before it is read rather than after, which is
+# what makes the last line printed the one that names a crashing folder.
+
+
+def test_verbose_writes_nothing_to_stdout(messy_tree, capsys):
+    """Progress belongs on stderr. If it leaks into stdout, every pipeline
+    built on messie breaks the day someone adds -v to it."""
+    main([str(messy_tree), "--no-color", "--backend", "wordllama"])
+    plain = capsys.readouterr().out
+
+    main([str(messy_tree), "--no-color", "--backend", "wordllama", "-v"])
+    captured = capsys.readouterr()
+
+    assert captured.out == plain
+    assert captured.err.strip(), "asked for verbose and got nothing"
+
+
+def test_verbose_json_still_parses(messy_tree, capsys):
+    code = main([str(messy_tree), "--json", "--backend", "wordllama", "--verbose"])
+    captured = capsys.readouterr()
+    assert code in (0, 1)
+    payload = json.loads(captured.out)
+    assert payload["folders"]
+
+
+def test_verbose_names_every_stage_and_the_cost(messy_tree, capsys):
+    main([str(messy_tree), "--no-color", "--backend", "wordllama", "-v"])
+    err = capsys.readouterr().err
+
+    for stage in ("scanning", "reading", "judging"):
+        assert stage in err, f"no sign of the {stage} stage in verbose output"
+    assert "files in" in err and "folders" in err, "no closing summary"
+
+
+def test_progress_reports_a_folder_before_reading_it(tmp_path):
+    """Named before, not after. A folder whose contents make an extractor throw
+    is only identifiable from the log if its name was printed on the way in."""
+    from messie.analyze import Progress, analyze_tree
+
+    (tmp_path / "sub").mkdir()
+    for i in range(8):
+        (tmp_path / "sub" / f"note_{i}.txt").write_text(f"a note about gardening {i}")
+
+    seen: list[Progress] = []
+    analyze_tree(tmp_path, progress=seen.append)
+
+    stages = [p.stage for p in seen]
+    assert stages.index("scan") < stages.index("read") < stages.index("judge")
+    reads = [p for p in seen if p.stage == "read"]
+    assert reads[0].done == 1 and reads[-1].done == reads[-1].total
+    assert any(p.path is not None and p.path.name == "sub" for p in reads)
+
+
+def test_analyze_tree_without_a_progress_callback_is_unchanged(tmp_path):
+    """The callback is optional and must stay that way — every other caller,
+    tests included, passes nothing."""
+    from messie.analyze import analyze_tree
+
+    for i in range(8):
+        (tmp_path / f"note_{i}.txt").write_text(f"a note about gardening {i}")
+
+    quiet = analyze_tree(tmp_path)
+    noisy = analyze_tree(tmp_path, progress=lambda _: None)
+    assert [a.score for a in quiet] == [a.score for a in noisy]

@@ -60,6 +60,7 @@ messie ~/Documents            # somewhere specific
 messie ~/Drive --depth 5      # look deeper (default 3)
 messie ~/Downloads --all      # show tidy folders too
 messie ~/Downloads --json     # machine-readable
+messie ~/Drive -v             # watch it work, on stderr
 messie --doctor               # which backends are available
 ```
 
@@ -247,6 +248,12 @@ pip install -e '.[semantic,dev]'
 pytest
 ruff check src tests
 ```
+
+`-v` / `--verbose` shows the walk as it happens — scanning, then reading, then
+judging, with a running count and the folder in hand. It goes to stderr, so
+`messie ~/Drive --json -v | jq` still works, and it names each folder *before*
+reading it: when a file makes an extractor throw, the last line printed is the
+folder holding it.
 
 `MESSIE_DEBUG=1` makes a signal that raises crash instead of being skipped.
 

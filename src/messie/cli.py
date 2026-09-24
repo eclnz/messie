@@ -11,7 +11,13 @@ from messie.analyze import analyze_tree
 from messie.cache import Cache, default_cache_path
 from messie.config import DEFAULT_SETTINGS
 from messie.embed import BACKEND_ORDER, backend_status, get_embedder
-from messie.report import RenderOptions, render_json, render_text, supports_colour
+from messie.report import (
+    ProgressPrinter,
+    RenderOptions,
+    render_json,
+    render_text,
+    supports_colour,
+)
 from messie.score import Verdict
 
 
@@ -38,6 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="quietest verdict worth printing (default: %(default)s)")
     parser.add_argument("--fail-over", default="messy",
                         help="exit 1 when any folder reaches this verdict (default: %(default)s)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="show the walk as it happens, on stderr")
     parser.add_argument("--no-cache", action="store_true", help="do not read or write the cache")
     parser.add_argument("--no-color", dest="colour", action="store_false", default=None,
                         help="disable coloured output")
@@ -97,14 +105,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"messie: no usable embedding backend: {exc}", file=sys.stderr)
         return 2
 
+    # Verbose output goes to stderr throughout, so that --json -v still pipes.
+    printer = ProgressPrinter() if args.verbose else None
+    if printer is not None:
+        print(f"messie {__version__} · {embedder.name} · {root}", file=sys.stderr)
+
     cache = Cache(enabled=not args.no_cache)
     try:
-        analyses = analyze_tree(root, settings, embedder=embedder, cache=cache)
+        analyses = analyze_tree(
+            root, settings, embedder=embedder, cache=cache, progress=printer
+        )
     except (NotADirectoryError, PermissionError) as exc:
         print(f"messie: {exc}", file=sys.stderr)
         return 2
     finally:
         cache.close()
+
+    if printer is not None:
+        printer.done(analyses)
 
     colour = args.colour if args.colour is not None else supports_colour()
     opts = RenderOptions(

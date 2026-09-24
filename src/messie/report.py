@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from messie.analyze import DirAnalysis
+from messie.analyze import DirAnalysis, Progress
 from messie.score import Verdict
 
 _COLOURS = {
@@ -215,3 +215,84 @@ def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
         "folders": [to_dict(a) for a in analyses],
     }
     return json.dumps(payload, indent=2, default=str)
+
+
+class ProgressPrinter:
+    """Draws a tree walk as it happens, on stderr.
+
+    stderr because stdout carries the report: ``messie --json -v | jq`` has to
+    keep working, and it only does if the chatter goes somewhere else.
+
+    On a terminal this is one line, rewritten in place. Redirected to a file it
+    becomes one line per folder at a sampled interval, because a log full of
+    carriage returns is not a log. Either way the folder is named before it is
+    read rather than after, so if something in it throws, the last line printed
+    is the folder that did it.
+    """
+
+    #: Rewriting the line faster than this buys nothing a person can see, and
+    #: on a big tree the terminal write costs more than the work it describes.
+    _MIN_INTERVAL = 0.08
+
+    _STAGES = {
+        "scan": "scanning",
+        "read": "reading",
+        "judge": "judging",
+    }
+
+    def __init__(self, stream=None, colour: bool | None = None, width: int = 78) -> None:
+        self._stream = stream if stream is not None else sys.stderr
+        self._live = bool(getattr(self._stream, "isatty", lambda: False)())
+        self._colour = supports_colour(self._stream) if colour is None else colour
+        self._width = width
+        self._last = 0.0
+        self._stage = ""
+        self._started = time.monotonic()
+        self._folders = 0
+        self._files = 0
+
+    def __call__(self, progress: Progress) -> None:
+        now = time.monotonic()
+        changed = progress.stage != self._stage
+        if changed:
+            self._stage = progress.stage
+        if progress.stage == "read":
+            self._folders = max(self._folders, progress.done)
+            self._files += progress.files
+
+        last = progress.done >= progress.total
+        if not (changed or last) and now - self._last < self._MIN_INTERVAL:
+            return
+        self._last = now
+
+        name = self._where(progress.path)
+        line = (
+            f"  {self._STAGES.get(progress.stage, progress.stage):<9}"
+            f"{progress.done:>5}/{progress.total:<6} {name}"
+        )
+        if self._live:
+            self._stream.write("\r" + _fit(_paint(line, _DIM, self._colour), self._width))
+            if last and progress.stage == "judge":
+                self._stream.write("\r" + " " * self._width + "\r")
+        elif changed or last:
+            self._stream.write(line.rstrip() + "\n")
+        self._stream.flush()
+
+    @staticmethod
+    def _where(path: Path | None) -> str:
+        if path is None:
+            return ""
+        # The tail is the informative part; a full path scrolls the line away.
+        parts = path.parts[-3:]
+        return "/".join(parts)
+
+    def done(self, analyses: list) -> None:
+        """One closing line with what the run actually cost."""
+        elapsed = time.monotonic() - self._started
+        judged = sum(1 for a in analyses if getattr(a, "judged", False))
+        summary = (
+            f"  read {self._files} files in {self._folders} folders, "
+            f"judged {judged}, in {elapsed:.1f}s"
+        )
+        self._stream.write(_paint(summary, _DIM, self._colour) + "\n")
+        self._stream.flush()
