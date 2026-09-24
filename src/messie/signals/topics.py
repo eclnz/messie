@@ -1,9 +1,4 @@
-"""Signals about meaning: unrelated things sharing a folder.
-
-This is the heart of messie. A folder of forty Word documents looks perfectly
-uniform by file type; if half of them are tax paperwork and half are chapters
-of a novel, it is a mess, and only the content says so.
-"""
+"""Signals for unrelated content sharing a folder."""
 
 from __future__ import annotations
 
@@ -12,10 +7,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from messie.signals import Finding, ramp, signal
+from messie.result import Finding
+from messie.signals import ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import SignalContext
+    from messie.analyze import SignalContext
 
 
 #: Each additional unrelated subject adds less than the one before it.
@@ -28,11 +24,7 @@ def _plural(n: int, word: str) -> str:
 
 
 def _dominant_subject(analysis: SignalContext) -> np.ndarray | None:
-    """The mean vector of this folder's largest meaningful cluster.
-
-    What the folder is mostly *about*, as distinct from the average of
-    everything in it — which includes whatever does not belong.
-    """
+    """Return the vector for the largest meaningful cluster."""
     clustering = analysis.clustering
     meaningful = analysis.meaningful_clusters()
     if clustering is None or not meaningful:
@@ -85,8 +77,7 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     covered = sum(sizes[cid] for cid in chosen)
     coverage = covered / max(1, analysis.n_files)
 
-    # How far apart they actually are: centroids near zero similarity are
-    # stronger evidence than ones just under the threshold.
+    # More separation produces stronger evidence.
     sim = clustering.link()
     pairs = [sim[a, b] for i, a in enumerate(chosen) for b in chosen[i + 1 :]]
     separation = 1.0 - max(0.0, float(np.mean(pairs))) / max(
@@ -94,9 +85,6 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     )
     sharpness = 0.8 + 0.2 * max(0.0, min(1.0, separation))
 
-    # Two genuinely unrelated bodies of work in one folder is already a mess —
-    # the canonical "my novel and my tax returns are in the same place" — so the
-    # curve starts high and saturates rather than ramping up from nothing.
     crowding = 1.0 - _TOPIC_DECAY ** (len(chosen) - 1)
     severity = crowding * (0.5 + 0.5 * coverage) * sharpness
 
@@ -131,19 +119,12 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     ]
 
 
-#: Above this share of unattached files, the folder has no subject at all and
-#: the wording changes from "some files do not belong" to "nothing belongs".
+# Above this share, report that the folder has no common thread.
 _NO_THREAD_SHARE = 0.65
 
 
 def _judgeable(analysis: SignalContext) -> np.ndarray:
-    """Files with enough content to say whether they belong with anything.
-
-    A photo we cannot open and a one-line note are uninformative, not
-    unrelated. Counting either as evidence of incoherence would flag every
-    photo album and every folder of jotted notes, so both are left out of this
-    reckoning entirely.
-    """
+    """Return files with enough text for topical comparison."""
     floor = analysis.settings.min_text_chars
     return np.array(
         [
@@ -155,10 +136,7 @@ def _judgeable(analysis: SignalContext) -> np.ndarray:
 
 
 def _loose_fraction(analysis: SignalContext) -> tuple[float, np.ndarray]:
-    """Share of judgeable files belonging to no group worth the name.
-
-    Returns the fraction and the indices of the files we could actually judge.
-    """
+    """Return the unattached share and judgeable file indices."""
     clustering = analysis.clustering
     eligible = np.flatnonzero(_judgeable(analysis)) if analysis.n_files else np.zeros(0, int)
     if clustering is None or eligible.size == 0:
@@ -170,20 +148,7 @@ def _loose_fraction(analysis: SignalContext) -> tuple[float, np.ndarray]:
 
 @signal
 def unattached_files(analysis: SignalContext) -> list[Finding]:
-    """Files belonging to no group here — a few of them, or all of them.
-
-    This is what ``unrelated_topics`` cannot see. That signal needs groups to
-    compare, and a folder where every file is about something different has
-    none, so at the point the mess is total the flagship signal goes quiet.
-    Saying so means counting the absence of structure rather than finding it.
-
-    "A few files do not belong" and "nothing here belongs to anything" are the
-    same observation at two intensities, so they share one measure and one
-    continuous severity, and only the wording changes. Splitting them into two
-    signals — as this once was — put a cliff at the handoff: just below it one
-    signal reported strongly, just above it the other had ramped up from zero,
-    and at the boundary exactly, neither spoke at all.
-    """
+    """Report files that do not belong to a meaningful group."""
     clustering = analysis.clustering
     if clustering is None or analysis.n_files < 2:
         return []
@@ -237,14 +202,7 @@ def unattached_files(analysis: SignalContext) -> list[Finding]:
 
 @signal
 def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
-    """Loose files that read like the contents of a folder somewhere below.
-
-    Not only the immediate children: people file things away several levels
-    down, and loose paperwork upstairs resembles ./Archive/2023/Taxes just as
-    much for that folder being deep.
-
-    Reported as an observation. Where they ought to go is not messie's call.
-    """
+    """Report loose files resembling a descendant folder."""
     if not analysis.child_profiles or analysis.n_files == 0:
         return []
 
@@ -261,17 +219,7 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
     if profiles.shape[1] != vectors.shape[1]:
         return []
 
-    # Only a subfolder that is about something *else* can have things misfiled
-    # into it. Where a subfolder holds the same subject as the folder above — a
-    # package and its own subpackages — every loose file resembles it and
-    # saying so is vacuous. This was the single largest source of false
-    # positives on real directories: all eight coherent folders flagged were
-    # packages resembling their own insides.
-    #
-    # The comparison is against this folder's *main* subject, not against the
-    # mean of everything in it. The mean includes the very files under
-    # suspicion, so a genuinely misfiled pile drags the mean towards the
-    # subfolder and hides itself.
+    # Ignore descendants that match the folder's main subject.
     main = _dominant_subject(analysis)
     if main is not None:
         distinct = np.array([float(p @ main) < analysis.thresholds.unrelated for p in profiles])

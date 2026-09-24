@@ -1,39 +1,20 @@
-"""Turning filenames and text into words.
-
-Filenames are dense with meaning but hostile to tokenisers:
-``2023_Tax-Return_FINALv2 (copy).docx`` has to become
-``tax return`` with the noise stripped, so that it embeds like the phrase a
-person would use for it.
-"""
+"""Tokenise filenames and extracted text."""
 
 from __future__ import annotations
 
 import re
 
-# Split lower->upper ("taxReturn"), and the tail of an acronym run, but only
-# where a real lowercase word follows: "XMLParser" splits, "FINALv2" must not
-# become "FINA"+"Lv2".
-#
-# This one stays ASCII. Python's re has no \p{Lu}, so matching accented capitals
-# would mean a third-party regex engine, and a capital in the middle of a word
-# is rare enough that it is not worth the dependency. "Crème Brûlée" splits on
-# its space like any other name; only "crèmeBrûlée" would be missed.
+# Split camel case and acronym-to-word boundaries.
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2,})")
 
-# Split on anything that is not a letter or digit *in any script*. An ASCII
-# class here would treat every accented letter as a separator and quietly
-# shred the word around it: "Déclaration" became "claration", "réunion" became
-# "union", "café" became "caf". Underscore is a word character to \w, so it has
-# to be listed as a separator explicitly.
+# Preserve Unicode letters and digits; split underscores explicitly.
 _SPLIT_RE = re.compile(r"[\W_]+", re.UNICODE)
 _DIGITS_RE = re.compile(r"^\d+$")
 _HEXISH_RE = re.compile(r"^[0-9a-f]{8,}$", re.IGNORECASE)
 _VERSIONED_RE = re.compile(r"([^\W\d_]+?)v?(\d+)", re.UNICODE)
 _VNUM_RE = re.compile(r"v\d+")
 
-#: Words meaning "another go at the same thing". Their presence in a name is
-#: what separates a pile of revisions from an ordinary numbered series, so
-#: these are tracked separately from merely generic words.
+# Revision markers are distinct from ordinary generic words.
 REVISION_WORDS: frozenset[str] = frozenset(
     {
         "final", "finalfinal", "draft", "copy", "copia", "kopie", "backup", "bak",
@@ -43,8 +24,7 @@ REVISION_WORDS: frozenset[str] = frozenset(
     }
 )
 
-#: Words that say nothing about what a file is about. Generic on their own —
-#: "document" in a filename is not evidence of anything.
+# Words that carry no topic signal.
 GENERIC_WORDS: frozenset[str] = frozenset(
     {
         "untitled", "unnamed", "document", "doc", "file", "scan", "scanned",
@@ -77,8 +57,7 @@ def split_words(raw: str) -> list[str]:
 
 
 def _unversion(word: str) -> str:
-    """Strip a trailing version number, but only where what remains is itself a
-    revision word — so ``finalv2`` becomes ``final`` while ``w2`` is left alone."""
+    """Strip a version suffix from a revision word."""
     match = _VERSIONED_RE.fullmatch(word)
     if match and match.group(1) in REVISION_WORDS:
         return match.group(1)
@@ -120,25 +99,17 @@ def content_tokens(text: str, limit: int = 400) -> list[str]:
 
 
 def version_markers(stem: str) -> list[str]:
-    """Revision words present in a name — the sediment of repeated saving.
-
-    Only genuine revision words count. "tax_document_04" is a numbered series,
-    not a pile of drafts, and must not be mistaken for one.
-    """
+    """Revision markers present in a filename."""
     words = split_words(stem)
     markers = [w for w in words if _unversion(w) in REVISION_WORDS]
-    # A bare "v3" or a trailing "(2)" is a version marker with no word to it.
+    # Include standalone version suffixes.
     if any(_VNUM_RE.fullmatch(w) for w in words) or re.search(r"\(\s*\d+\s*\)\s*$", stem):
         markers.append("version-suffix")
     return markers
 
 
 def base_stem(stem: str) -> str:
-    """The stem with version noise removed, for grouping near-identical names.
-
-    ``report.docx``, ``report_final.docx`` and ``report_v2 (copy).docx`` all
-    reduce to ``report``, which is what makes them one pile.
-    """
+    """Remove version noise from a filename stem."""
     kept = [
         w
         for w in (_unversion(raw) for raw in split_words(stem))

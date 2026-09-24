@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from messie.kinds import DEBRIS_NAME_RE, UNNAMED_RE
-from messie.signals import Finding, ramp, signal
+from messie.result import Finding
+from messie.signals import ramp, signal
 from messie.tokens import base_stem, version_markers
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import SignalContext
+    from messie.analyze import SignalContext
 
 _HEAD_BYTES = 65536
 _FULL_HASH_LIMIT = 64 << 20  # don't read a 4 GB video twice to prove it's a twin
@@ -23,7 +24,7 @@ _FULL_HASH_LIMIT = 64 << 20  # don't read a 4 GB video twice to prove it's a twi
 
 @signal
 def debris(analysis: SignalContext) -> list[Finding]:
-    """Leftovers nobody chose to keep: lock files, partial downloads, empties."""
+    """Report lock files, partial downloads, and empty files."""
     found: list[tuple[str, str]] = []
     for entry in analysis.files:
         name = entry.name
@@ -178,13 +179,9 @@ def duplicates(analysis: SignalContext) -> list[Finding]:
     ]
 
 
-#: Vector similarity only nominates a pair; the text has to agree, and the bar
-#: is deliberately severe. Two invoices off the same template differ by a few
-#: dozen characters in a few thousand and are emphatically not copies of each
-#: other, so anything short of "the same document" must not be called one.
+# Text similarity required to confirm a near-duplicate candidate.
 _TEXT_CONFIRM = 0.995
-#: Below this much text, a one-word difference is a large share of the whole,
-#: and the ratio stops meaning anything.
+# Minimum text length for near-duplicate comparison.
 _MIN_TEXT_FOR_NEAR_DUP = 200
 _COMPARE_CHARS = 2000
 
@@ -195,21 +192,9 @@ def _char_counts(text: str) -> Counter[str]:
 
 
 def _overlap_bound(counts_a: Counter[str], counts_b: Counter[str], total: int) -> float:
-    """Upper bound on ``difflib``'s ratio, from character multisets alone.
-
-    This is exactly ``SequenceMatcher.quick_ratio``, recomputed here for one
-    reason: difflib can only offer it from an instance, and building that
-    instance indexes the whole second string. The same excerpt takes part in
-    many candidate pairs, so difflib re-indexes it once per pair, while the
-    character counts below are built once per file and reused.
-
-    Matching characters cannot exceed what both strings have of each, so a pair
-    scoring below the confirmation bar here cannot reach it in the real
-    comparison either. Verified equal to ``quick_ratio`` on random pairs.
-    """
+    """Return a cheap upper bound on ``SequenceMatcher`` similarity."""
     if not counts_a or not counts_b:
         return 0.0
-    # Walk the smaller multiset; the intersection is the same either way.
     if len(counts_a) > len(counts_b):
         counts_a, counts_b = counts_b, counts_a
     matches = sum(min(n, counts_b[char]) for char, n in counts_a.items())
@@ -217,13 +202,7 @@ def _overlap_bound(counts_a: Counter[str], counts_b: Counter[str], total: int) -
 
 
 def _near_duplicates(analysis: SignalContext, already: set[int]) -> list[tuple[int, int]]:
-    """Pairs that really are near-identical copies of each other.
-
-    Vectors alone cannot carry this claim: static embeddings blur two documents
-    that share a template into near-identical vectors even when they say quite
-    different things. So the vectors nominate candidates and the extracted text
-    has the final word.
-    """
+    """Confirm vector-similar files with their extracted text."""
     clustering = analysis.clustering
     if clustering is None or clustering.sim.size == 0:
         return []
@@ -234,9 +213,6 @@ def _near_duplicates(analysis: SignalContext, already: set[int]) -> list[tuple[i
     out: list[tuple[int, int]] = []
     seen: set[int] = set()
 
-    # Character counts per file, built on first use. A folder of near-identical
-    # config files nominates thousands of pairs drawn from a few dozen files,
-    # so counting each file once instead of once per pair is most of the win.
     counts: dict[int, Counter[str]] = {}
 
     for a, b in pairs:
@@ -251,10 +227,7 @@ def _near_duplicates(analysis: SignalContext, already: set[int]) -> list[tuple[i
             len_a, len_b = len(text_a), len(text_b)
             if min(len_a, len_b) < _MIN_TEXT_FOR_NEAR_DUP:
                 continue
-            # Two cheap exact upper bounds before the quadratic comparison.
-            # Lengths first, from two integers: matched characters cannot
-            # exceed the shorter excerpt, so excerpts differing in length by
-            # more than half a percent can never reach the bar.
+            # Reject pairs that cannot reach the confirmation threshold.
             total = len_a + len_b
             if 2.0 * min(len_a, len_b) / total < _TEXT_CONFIRM:
                 continue

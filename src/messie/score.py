@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from messie.config import DEFAULT_SETTINGS, Settings
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.signals import Finding
+    from messie.result import Finding
 
 
 class Verdict(IntEnum):

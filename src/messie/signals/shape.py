@@ -1,30 +1,19 @@
-"""Signals about the shape of a folder rather than its meaning.
-
-There was once a ``type_soup`` signal here, firing when a folder held many
-different *sorts* of file evenly mixed. Measured across the demo tree it fired
-on more folders than any other signal and never once changed a verdict band,
-and on real coherent directories it was noise. A signal that never decides
-anything is weight without a vote, so it was removed.
-"""
+"""Signals based on folder shape rather than content."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from messie.signals import Finding, ramp, signal
+from messie.result import Finding
+from messie.signals import ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import SignalContext
+    from messie.analyze import SignalContext
 
 
 @signal
 def overcrowded(analysis: SignalContext) -> list[Finding]:
-    """Far too many things loose in one place.
-
-    Opt-in: see ``Settings.report_crowding`` for the measurement that made it
-    so. A count is not evidence about contents, and this is the only signal
-    that offers one.
-    """
+    """Report opt-in crowding in a flat folder."""
     if not analysis.settings.report_crowding:
         return []
 

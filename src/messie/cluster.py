@@ -1,27 +1,4 @@
-"""Grouping the files in one folder by what they are about.
-
-Everything here works in *average-link* similarity: the mean cosine between
-every pair of members across two groups. For unit vectors that is exactly
-
-    link(A, B) = (ΣA · ΣB) / (|A| · |B|)
-
-which is cheap to maintain incrementally and, importantly, lives on the same
-scale as ordinary pairwise similarity. Comparing normalised centroids instead
-would inflate the numbers for tight clusters and quietly merge groups that are
-plainly about different things.
-
-Full agglomeration is O(n^3), too slow for a folder of a few thousand files, so
-this does two cheap passes that reach the same place:
-
-1. *Leader assignment* — walk files most-central first, dropping each into the
-   group it is on average most like, above threshold, else starting a new one.
-   Averaging over members avoids the chaining that makes single-link quietly
-   weld two unrelated groups together through one ambiguous file between them.
-2. *Group agglomeration* — exact average-link merging over the handful of
-   groups that pass produces, which is small enough to be free.
-
-Both passes are deterministic: the same folder always yields the same verdict.
-"""
+"""Deterministic average-link clustering for file vectors."""
 
 from __future__ import annotations
 
@@ -153,8 +130,7 @@ def cluster_vectors(vectors: np.ndarray, threshold: float) -> Clustering:
     best_other = off_diagonal.max(axis=1) if n > 1 else np.zeros(n, dtype=np.float32)
     empty.best_other = best_other.astype(np.float32)
 
-    # Most-connected files lead, so groups form around their densest point
-    # rather than around whichever file happened to sort first.
+    # Seed groups from their most-connected files.
     centrality = np.where(off_diagonal > threshold, off_diagonal, 0.0).sum(axis=1)
     order = np.argsort(-centrality, kind="stable")
 

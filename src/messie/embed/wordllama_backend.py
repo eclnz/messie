@@ -1,14 +1,4 @@
-"""WordLlama backend — the default.
-
-Chosen because its weights and tokenizer ship inside the PyPI wheel, so it
-never contacts a network, not even on first use. Inference is plain numpy.
-
-One wrinkle: upstream looks for the bundled tokenizer under ``<pkg>/tokenizer/``
-while it actually ships in ``<pkg>/tokenizers/``, so a default load reaches for
-Hugging Face and fails on an offline machine. We copy the bundled file into the
-cache location upstream checks next, then load with downloads disabled — which
-also guarantees no request is ever made.
-"""
+"""Offline WordLlama embedding backend."""
 
 from __future__ import annotations
 
@@ -46,17 +36,7 @@ def _seed_tokenizer(wordllama_cls) -> None:
 
 class WordLlamaEmbedder:
     name = "wordllama"
-    #: Measured against the example corpus in tests/corpus by
-    #: ``scripts/calibrate.py``: at the threshold this implies (0.26), 76% of
-    #: single-subject folders form exactly one group and 92% of two-subject
-    #: folders stay apart. Pooled over three reshuffles of the pair sample the
-    #: optimum comes out at 0.40 again, so the constant is stable.
-    #:
-    #: An earlier comment here claimed 97% and 84%. Those were true of a
-    #: smaller corpus; the corpus has since roughly doubled and grown harder,
-    #: and the numbers were never re-measured. They are the reason
-    #: ``test_the_shipped_threshold_performs`` asserted a rate the code had not
-    #: met for some time.
+    #: Calibrated by ``scripts/calibrate.py``.
     scale = 0.40
 
     def __init__(self, dim: int = 256) -> None:

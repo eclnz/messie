@@ -3,22 +3,31 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+import re
+from typing import NamedTuple
 
 import numpy as np
 
-from messie.config import DEFAULT_SETTINGS, Settings
-from messie.embed import Embedder, get_embedder
-from messie.engine import analyze, profile, profile_of, vectorize
-from messie.result import DirAnalysis, VectorRecord
-from messie.scan import read_dir, walk
+from messie.cluster import Clustering, cluster_vectors
+from messie.config import DEFAULT_SETTINGS, Settings, Thresholds
+from messie.embed import Embedder, get_embedder, normalise
+from messie.extract import extract_text
+from messie.kinds import Kind, is_textual, kind_phrase
+from messie.label import file_terms, format_label, label_clusters
+from messie.metadata import describe
+from messie.result import DirAnalysis, SkipReason
+from messie.scan import DirContents, FileEntry, read_dir, walk
+from messie.score import score_findings
+from messie.signals import run_all
+from messie.tokens import name_tokens
 
 __all__ = [
     "DirAnalysis",
     "Progress",
     "ProgressFn",
-    "VectorRecord",
     "analyze_dir",
     "analyze_tree",
 ]
@@ -37,6 +46,216 @@ class Progress:
 ProgressFn = Callable[[Progress], None]
 
 
+class VectorRecord(NamedTuple):
+    """What vectorising one folder produced."""
+
+    texts: list[str]
+    vectors: np.ndarray
+    topical: np.ndarray
+    terms: list[Counter]
+
+
+@dataclass
+class SignalContext:
+    """Evidence and settings a signal needs while judging one folder."""
+
+    path: Path
+    settings: Settings
+    thresholds: Thresholds
+    backend: str
+    files: list[FileEntry]
+    texts: list[str]
+    terms: list[Counter]
+    vectors: np.ndarray
+    topical: np.ndarray
+    clustering: Clustering
+    cluster_labels: dict[int, list[str]]
+    child_profiles: dict[Path, np.ndarray]
+    subdirs: list[Path]
+    truncated: int
+
+    @property
+    def n_files(self) -> int:
+        return len(self.files)
+
+    def meaningful_clusters(self) -> list[int]:
+        floor = max(
+            self.settings.meaningful_cluster_min,
+            int(self.settings.meaningful_cluster_frac * self.n_files),
+        )
+        sizes = self.clustering.sizes()
+        return [cluster for cluster, size in sizes.items() if size >= floor]
+
+    def members(self, cluster: int) -> list[int]:
+        return self.clustering.members(cluster).tolist()
+
+    def label_of(self, cluster: int) -> str:
+        return format_label(self.cluster_labels.get(cluster, []))
+
+    def names(self, indices: list[int], limit: int = 3) -> list[str]:
+        return [self.files[index].name for index in indices[:limit]]
+
+    def mtime_span(self, indices: list[int]) -> tuple[float, float]:
+        if not indices:
+            return (0.0, 0.0)
+        times = [self.files[index].mtime for index in indices]
+        return (min(times), max(times))
+
+
+class Mix(NamedTuple):
+    """How much the text, name and kind vectors each count."""
+
+    text: float
+    name: float
+    kind: float
+
+
+_MIX_RICH = Mix(0.75, 0.20, 0.05)
+_MIX_THIN = Mix(0.45, 0.40, 0.15)
+_MIX_NAME = Mix(0.00, 0.80, 0.20)
+_MIX_KIND = Mix(0.00, 0.00, 1.00)
+_MIX_META = Mix(0.85, 0.15, 0.00)
+_WORDS_RE = re.compile(r"[^\W\d_]{3,}")
+_COMMON_NAME_SHARE = 0.7
+
+
+def _name_phrases(files: list[FileEntry]) -> list[str]:
+    token_lists = [name_tokens(file.stem) for file in files]
+    common: set[str] = set()
+    if len(files) >= 5:
+        frequency: Counter[str] = Counter()
+        for tokens in token_lists:
+            frequency.update(set(tokens))
+        cutoff = _COMMON_NAME_SHARE * len(files)
+        common = {token for token, count in frequency.items() if count >= cutoff}
+    return [" ".join(token for token in tokens if token not in common) for tokens in token_lists]
+
+
+def _mix_for(entry: FileEntry, text: str, name: str, settings: Settings) -> Mix:
+    if text.strip() and not is_textual(entry.kind) and _WORDS_RE.search(text):
+        return _MIX_META
+    if text.strip() and len(text) >= settings.min_text_chars:
+        return _MIX_RICH
+    if text.strip():
+        return _MIX_THIN
+    if name.strip():
+        return _MIX_NAME
+    return _MIX_KIND
+
+
+def vectorize(
+    files: list[FileEntry], *, embedder: Embedder, settings: Settings = DEFAULT_SETTINGS
+) -> VectorRecord:
+    """Turn scanned files into the evidence needed by signals."""
+    texts = [extract_text(file, settings) or describe(file) for file in files]
+    names = _name_phrases(files)
+    text_vectors = embedder.encode(texts)
+    name_vectors = embedder.encode(names)
+    kind_vectors = embedder.encode([kind_phrase(file.kind) for file in files])
+    vectors = np.zeros((len(files), text_vectors.shape[1]), dtype=np.float32)
+    topical = np.zeros(len(files), dtype=bool)
+
+    for index, (entry, text, name) in enumerate(zip(files, texts, names, strict=True)):
+        if entry.kind is Kind.JUNK or entry.size == 0:
+            continue
+        mix = _mix_for(entry, text, name, settings)
+        vectors[index] = (
+            mix.text * text_vectors[index]
+            + mix.name * name_vectors[index]
+            + mix.kind * kind_vectors[index]
+        )
+        topical[index] = bool(text.strip()) or bool(name.strip())
+
+    terms = [file_terms(file.stem, text) for file, text in zip(files, texts, strict=True)]
+    return VectorRecord(texts, normalise(vectors), topical, terms)
+
+
+def profile_of(vectors: np.ndarray) -> np.ndarray:
+    if vectors.size == 0:
+        return np.zeros(0, dtype=np.float32)
+    return vectors.mean(axis=0).astype(np.float32)
+
+
+def profile(
+    files: list[FileEntry], *, embedder: Embedder, settings: Settings = DEFAULT_SETTINGS
+) -> np.ndarray:
+    if not files:
+        return np.zeros(0, dtype=np.float32)
+    return profile_of(vectorize(files, embedder=embedder, settings=settings).vectors)
+
+
+def analyze(
+    contents: DirContents,
+    *,
+    embedder: Embedder | None = None,
+    settings: Settings = DEFAULT_SETTINGS,
+    child_profiles: dict[Path, np.ndarray] | None = None,
+    precomputed: VectorRecord | None = None,
+) -> DirAnalysis:
+    """Judge scanned folder contents, reusing vectors when supplied."""
+    embedder = embedder or get_embedder()
+    if len(contents.files) < settings.min_files_to_judge:
+        return DirAnalysis(
+            path=contents.path,
+            backend=embedder.name,
+            n_files=len(contents.files),
+            truncated=contents.truncated,
+            judged=False,
+            skip_reason=SkipReason.TOO_FEW_FILES,
+        )
+
+    thresholds = Thresholds.derive(
+        embedder.scale, settings, settings.cluster_threshold_override
+    )
+    record = precomputed or vectorize(contents.files, embedder=embedder, settings=settings)
+    clustering = cluster_vectors(record.vectors, thresholds.cluster)
+    context = SignalContext(
+        path=contents.path,
+        settings=settings,
+        thresholds=thresholds,
+        backend=embedder.name,
+        files=list(contents.files),
+        texts=record.texts,
+        terms=record.terms,
+        vectors=record.vectors,
+        topical=record.topical,
+        clustering=clustering,
+        cluster_labels=label_clusters(clustering.labels, record.terms, clustering.n_clusters),
+        child_profiles=child_profiles or {},
+        subdirs=list(contents.subdirs),
+        truncated=contents.truncated,
+    )
+    signal_run = run_all(context)
+    score, verdict = score_findings(signal_run.findings, settings)
+    return DirAnalysis(
+        path=context.path,
+        backend=context.backend,
+        n_files=context.n_files,
+        truncated=context.truncated,
+        clusters=clustering.n_clusters,
+        meaningful_clusters=len(context.meaningful_clusters()),
+        findings=signal_run.findings,
+        failed_signals=signal_run.failed,
+        score=score,
+        verdict=verdict,
+    )
+
+
+def _descendant_profiles(
+    root: Path,
+    settings: Settings,
+    embedder: Embedder,
+) -> dict[Path, np.ndarray]:
+    """Profiles of meaningful folders below ``root`` for misfiling checks."""
+    profiles: dict[Path, np.ndarray] = {}
+    for contents in walk(root, settings):
+        path = contents.path.resolve()
+        if path == root or len(contents.files) < settings.meaningful_cluster_min:
+            continue
+        profiles[path] = profile(contents.files, embedder=embedder, settings=settings)
+    return profiles
+
+
 def analyze_dir(
     path: Path,
     settings: Settings = DEFAULT_SETTINGS,
@@ -44,18 +263,70 @@ def analyze_dir(
 ) -> DirAnalysis:
     "Judge a single folder, ignoring what is in its subfolders."
     embedder = embedder or get_embedder()
-    root = Path(path).expanduser().resolve()
-    contents = read_dir(root, settings)
+    root = path.expanduser().resolve()
+    return analyze(
+        read_dir(root, settings),
+        embedder=embedder,
+        settings=settings,
+        child_profiles=_descendant_profiles(root, settings, embedder),
+    )
 
-    profiles = {}
-    for sub_contents in walk(root, settings):
-        if sub_contents.path.resolve() == root:
+
+def _vectorized_profiles(
+    contents: list[DirContents],
+    settings: Settings,
+    embedder: Embedder,
+    report: ProgressFn,
+) -> tuple[dict[Path, VectorRecord], dict[Path, np.ndarray]]:
+    """Vectorise each meaningful folder once and derive its profile."""
+    records: dict[Path, VectorRecord] = {}
+    profiles: dict[Path, np.ndarray] = {}
+    for done, folder in enumerate(contents, start=1):
+        report(Progress("read", done, len(contents), folder.path, len(folder.files)))
+        if len(folder.files) < settings.meaningful_cluster_min:
             continue
-        if len(sub_contents.files) >= settings.meaningful_cluster_min:
-            profiles[sub_contents.path.resolve()] = profile(
-                sub_contents.files, embedder=embedder, settings=settings
+        path = folder.path.resolve()
+        records[path] = vectorize(folder.files, embedder=embedder, settings=settings)
+        profiles[path] = profile_of(records[path].vectors)
+    return records, profiles
+
+
+def _profiles_by_ancestor(
+    contents: list[DirContents], profiles: dict[Path, np.ndarray]
+) -> dict[Path, dict[Path, np.ndarray]]:
+    """Give every folder the profiles of all meaningful folders below it."""
+    paths = {folder.path.resolve() for folder in contents}
+    descendants: dict[Path, dict[Path, np.ndarray]] = {}
+    for descendant, profile in profiles.items():
+        for ancestor in descendant.parents:
+            if ancestor in paths:
+                descendants.setdefault(ancestor, {})[descendant] = profile
+    return descendants
+
+
+def _judge_tree(
+    contents: list[DirContents],
+    settings: Settings,
+    embedder: Embedder,
+    records: dict[Path, VectorRecord],
+    descendants: dict[Path, dict[Path, np.ndarray]],
+    report: ProgressFn,
+) -> list[DirAnalysis]:
+    """Judge every scanned folder using already-computed vector records."""
+    results = []
+    for done, folder in enumerate(contents, start=1):
+        report(Progress("judge", done, len(contents), folder.path, len(folder.files)))
+        path = folder.path.resolve()
+        results.append(
+            analyze(
+                folder,
+                embedder=embedder,
+                settings=settings,
+                child_profiles=descendants.get(path, {}),
+                precomputed=records.get(path),
             )
-    return analyze(contents, embedder=embedder, settings=settings, child_profiles=profiles)
+        )
+    return sorted(results, key=lambda analysis: (-analysis.score, str(analysis.path)))
 
 
 def analyze_tree(
@@ -67,53 +338,15 @@ def analyze_tree(
     """Judge every folder at or under ``root``, worst first."""
     embedder = embedder or get_embedder()
     report: ProgressFn = progress or (lambda _: None)
-
-    all_contents = walk(Path(root), settings)
-    total = len(all_contents)
-    report(Progress("scan", total, total, Path(root)))
-    by_path = {c.path.resolve(): c for c in all_contents}
-
-    # Vectorise each folder once. The result serves both that folder's own
-    # analysis and its parent's view of it as a subfolder.
-    records: dict[Path, VectorRecord] = {}
-    profiles: dict[Path, np.ndarray] = {}
-    for done, contents in enumerate(all_contents, start=1):
-        report(Progress("read", done, total, contents.path, len(contents.files)))
-        if len(contents.files) < settings.meaningful_cluster_min:
-            continue
-        key = contents.path.resolve()
-        records[key] = vectorize(contents.files, embedder=embedder, settings=settings)
-        profiles[key] = profile_of(records[key].vectors)
-
-    # Every folder underneath, not just the immediate children. People file
-    # things away several levels down — ./Archive/2023/Taxes — and loose
-    # paperwork upstairs resembles that folder just as much for being deep.
-    #
-    # Built by walking each folder *up* to its ancestors, rather than by asking
-    # every folder whether every other folder sits beneath it. The second reads
-    # more naturally and is quadratic: 1600 folders spent 13s comparing paths
-    # and found nothing, because the answer for almost every pair is no. A path
-    # has a handful of ancestors and a dict lookup settles each one, so this is
-    # linear in the tree and the cost disappears.
-    descendants: dict[Path, dict[Path, np.ndarray]] = {}
-    for other, profile in profiles.items():
-        for ancestor in other.parents:
-            if ancestor in by_path:
-                descendants.setdefault(ancestor, {})[other] = profile
-
-    results: list[DirAnalysis] = []
-    for done, contents in enumerate(all_contents, start=1):
-        report(Progress("judge", done, total, contents.path, len(contents.files)))
-        key = contents.path.resolve()
-        results.append(
-            analyze(
-                contents,
-                embedder=embedder,
-                settings=settings,
-                child_profiles=descendants.get(key, {}),
-                precomputed=records.get(key),
-            )
-        )
-
-    results.sort(key=lambda a: (-a.score, str(a.path)))
-    return results
+    root = Path(root).expanduser().resolve()
+    contents = walk(root, settings)
+    report(Progress("scan", len(contents), len(contents), root))
+    records, profiles = _vectorized_profiles(contents, settings, embedder, report)
+    return _judge_tree(
+        contents,
+        settings,
+        embedder,
+        records,
+        _profiles_by_ancestor(contents, profiles),
+        report,
+    )

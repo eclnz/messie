@@ -15,7 +15,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from messie.analyze import DirAnalysis, Progress
+from messie.analyze import Progress
+from messie.result import DirAnalysis
 from messie.score import Verdict
 
 _COLOURS = {

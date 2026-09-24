@@ -94,11 +94,7 @@ def _from_plain(path: Path, limit: int, max_bytes: int) -> str:
     return _clean(_decode(raw), limit)
 
 
-#: RTF groups that hold machinery rather than prose. Their *contents* are
-#: readable words — font and colour names, style names, the producing
-#: application — so stripping control words alone leaves "Helvetica;" and
-#: "Times New Roman;" sitting at the front of every document's text, where they
-#: pollute the vector and make two unrelated files look slightly alike.
+# RTF groups that contain document machinery rather than prose.
 _RTF_MACHINERY = frozenset(
     {
         "fonttbl", "colortbl", "stylesheet", "info", "pict", "listtable",

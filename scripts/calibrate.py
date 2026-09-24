@@ -63,7 +63,7 @@ from realdirs import coherent_folders  # noqa: E402
 from messie.cluster import cluster_vectors  # noqa: E402
 from messie.config import DEFAULT_SETTINGS  # noqa: E402
 from messie.embed import get_embedder  # noqa: E402
-from messie.engine import analyze, profile, vectorize  # noqa: E402
+from messie.analyze import analyze, profile, vectorize  # noqa: E402
 from messie.scan import read_dir, walk  # noqa: E402
 from messie.score import Verdict  # noqa: E402
 

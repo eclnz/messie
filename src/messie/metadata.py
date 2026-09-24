@@ -1,47 +1,4 @@
-"""Reading what a binary file says about itself.
-
-messie understands documents by reading them. Archives, fonts and images it
-could not read at all, so each was represented by the same stand-in phrase —
-``photograph picture image`` for every photograph anybody has ever taken.
-
-Byte-level similarity was tried first and measured. Normalized compression
-distance separates files in the same real directory from files in different
-ones with a gap of 0.72 for SVG (which is really text) and 0.13 for shared
-libraries, but only 0.016 for PNG, 0.005 for TrueType and 0.002 for gzip.
-Already-compressed formats are entropy-coded, so their bytes look random
-whatever the content and NCD saturates near 1.0. It cannot see photographs, so
-it is not used.
-
-What works is container metadata, which is not a guess about a file but a
-statement the file makes about itself. Read here and handed back as a short
-phrase, it goes through the same embedding and clustering as any document's
-text: no new signal, no new thresholds.
-
-Scope is deliberately narrow, and set by what measurement supported:
-
-    archives   the member list — a zip of holiday photos and a zip of tax
-               papers are plainly different things, and the manifest says so
-    fonts      family and foundry, worth 0.60 of separation between real font
-               directories where there was none
-    images     dimensions always, and with Pillow installed the kind of image
-               it is — photograph, scan, screenshot — from its EXIF
-
-Audio tags were built and removed. Telling one album from another is
-discrimination between things that are alike, and it changed no verdict.
-
-EXIF was removed for the same reason and then brought back, because the reason
-was wrong. The case first tested was one camera roll against another, which is
-also things that are alike, and which a Pictures folder holds quite normally.
-The case that matters is a folder mixing *kinds* of image, and there the
-measurement is clear: given category words, seven of ten image-category pairs
-fall below the threshold at which messie calls two groups unrelated — a scan
-and a photograph sit at 0.138 against a line at 0.220. Photographs,
-screenshots and memes stay above it and group together, which is the right
-answer for three kinds of casual digital image.
-
-Pillow is optional, so none of that costs anything to anyone who does not want
-it; without it images still report their dimensions.
-"""
+"""Extract short descriptive metadata from archives, fonts, and images."""
 
 from __future__ import annotations
 
@@ -57,11 +14,7 @@ from messie.scan import FileEntry
 _HEAD_BYTES = 4096
 #: Archives can hold thousands of members; a sample says as much as all of them.
 _MAX_MEMBERS = 60
-#: Keep descriptions short. They say what a file is, not what it contains at
-#: length. An image's description is a handful of words and so stays under
-#: ``min_text_chars``, which is what keeps photo albums out of the coherence
-#: reckoning entirely; an archive with forty distinct member names has said
-#: something substantial about itself and is judged on it like any document.
+# Keep metadata phrases short.
 _MAX_WORDS = 40
 
 _ARCHIVE_EXTS = frozenset({"zip", "whl", "jar", "egg", "apk", "tar", "tgz"})
@@ -86,13 +39,7 @@ def _clip(words: list[str]) -> str:
 
 
 def _describe_archive(path: Path) -> str:
-    """The member list. An archive is a folder that happens to be one file.
-
-    A bare ``.gz`` or ``.bz2`` holds a single stream with no member list, and
-    its original name is already in the filename, so nothing is attempted for
-    those. That also stops ``tarfile.is_tarfile`` quietly decompressing a large
-    file only to discover it is not a tar.
-    """
+    """Describe archive members without opening bare compressed streams."""
     names: list[str] = []
     tar_like = path.name.lower().endswith(_TAR_SUFFIXES)
     try:
@@ -216,10 +163,7 @@ def _jpeg_size(data: bytes) -> str:
     return ""
 
 
-#: Words in an image's Software tag that say what produced it. The file is
-#: naming its own producer, so this reads a stated fact rather than guessing
-#: from pixels — but which words imply which category is a judgement, kept
-#: deliberately short.
+# Image-software keywords used for coarse categorisation.
 _SCREENSHOT_HINTS = ("shot", "snip", "capture", "grab", "screen")
 _SCANNER_HINTS = ("scan", "epson", "canoscan", "twain", "xerox")
 

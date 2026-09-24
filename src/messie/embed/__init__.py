@@ -1,37 +1,4 @@
-"""Turning file text into vectors, locally.
-
-There is one backend. wordllama is a hard dependency rather than one option
-among several, so a backend always exists and it never needs the network — its
-weights and tokenizer ship inside the wheel.
-
-Three others have been tried and measured away, which is worth recording so
-they are not reinvented:
-
-    lexical     hashed TF-IDF, for machines that could not fetch a model. Held
-                71% of subjects together against wordllama's 97% — an older,
-                smaller corpus than the figures below, so compare it only with
-                the 97%, not with them. Since wordllama downloads nothing, a
-                fallback for machines that cannot download bought nothing.
-    model2vec   significantly worse on the example corpus (sum of held and
-                separated rates 1.605 against 1.649, bootstrap P=99.6%), in
-                exchange for a speed gain nobody can perceive on a stage that
-                takes 25ms.
-    sentence    sentence-transformers. Statistically indistinguishable at its
-                own best threshold (1.611 against 1.649, 95% CI spanning
-                zero), but decisively worse where messie actually operates:
-                asked to keep 90% of unrelated subject pairs apart, it holds
-                59% of real subjects together against wordllama's 73%. It also
-                costs 30x the runtime, ~400MB of torch, and a download on
-                first use — and its optimal scale moved 0.34/0.37/0.43 across
-                three reshuffles of one corpus, a spread wider than the drift
-                tolerance the calibration guard allows, so no stable constant
-                could be shipped for it at all.
-
-``scripts/calibrate.py`` produced those numbers and can reproduce them against
-any new candidate. The Embedder protocol below is the whole contract: a name, a
-scale, and ``encode``. Adding a fourth backend means implementing it, measuring
-it, and beating 1.649 at the strict end of the frontier.
-"""
+"""Local text embedding backends."""
 
 from __future__ import annotations
 
@@ -40,16 +7,13 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-#: Every backend there is. Still a tuple, and still the thing ``--backend``
-#: and ``--doctor`` enumerate, so a second entry costs nothing to reintroduce.
 BACKEND_ORDER: tuple[str, ...] = ("wordllama",)
 
 
 @runtime_checkable
 class Embedder(Protocol):
     name: str
-    #: Typical cosine between two files on the same subject under this
-    #: backend. Thresholds are expressed as fractions of it.
+    #: Typical within-subject cosine similarity.
     scale: float
 
     def encode(self, texts: list[str]) -> np.ndarray:
@@ -71,33 +35,12 @@ def normalise(vectors: np.ndarray) -> np.ndarray:
 
 
 def encodable(text: str) -> str:
-    """Strip characters no tokenizer will accept.
-
-    Text read off a real disk is not guaranteed to be valid Unicode. messie
-    decodes with ``surrogateescape``, which is the right choice — it makes
-    undecodable bytes round-trip instead of throwing — but it leaves lone
-    surrogates in the string, and a tokenizer backed by Rust rejects those
-    outright rather than substituting anything.
-
-    The result was a hard crash, not a bad verdict: ``TypeError:
-    TextEncodeInput must be ...`` from inside the model, on any tree containing
-    a binary that half-decodes. CPython's own test suite ships one
-    (``test/archivetestdata/testtar.tar``, whose umlaut filenames survive as
-    escaped surrogate pairs), so this fired on a stock Python install.
-
-    Guarded here rather than at extraction because it is a property of what
-    models accept, not of what files contain, and every backend needs it.
-    """
+    """Replace invalid Unicode before passing text to a tokenizer."""
     return text.encode("utf-8", "replace").decode("utf-8")
 
 
 def encode_nonblank(texts: list[str], encode_fn, dim: int) -> np.ndarray:
-    """Run ``encode_fn`` over the non-blank texts, leaving blanks as zero rows.
-
-    A blank string has no meaning to represent. Passing one to a model yields a
-    zero-norm vector and a divide-by-zero warning, and whatever comes out the
-    other side would be noise pretending to be a topic.
-    """
+    """Encode non-blank texts and use zero rows for blanks."""
     out = np.zeros((len(texts), dim), dtype=np.float32)
     wanted = [i for i, t in enumerate(texts) if t.strip()]
     if wanted:
@@ -119,12 +62,7 @@ def _load(name: str) -> Embedder:
 
 
 def get_embedder(preference: str | None = None) -> Embedder:
-    """Best available backend, or the named one.
-
-    Naming a backend explicitly makes its absence an error rather than a silent
-    downgrade — a verdict should never quietly come from a weaker model than
-    the one that was asked for.
-    """
+    """Return the requested backend, or the default backend."""
     if preference and preference != "auto":
         return _load(preference)
 

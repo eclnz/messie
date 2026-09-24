@@ -9,9 +9,8 @@ Everything runs on this machine. No network calls are made during analysis.
 """
 
 from messie.analyze import analyze_dir, analyze_tree
-from messie.result import DirAnalysis, SkipReason
+from messie.result import DirAnalysis, Finding, SkipReason
 from messie.score import Verdict
-from messie.signals import Finding
 
 __all__ = ["DirAnalysis", "Finding", "SkipReason", "Verdict", "analyze_dir", "analyze_tree"]
 __version__ = "0.1.0"

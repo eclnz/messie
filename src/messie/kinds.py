@@ -164,10 +164,7 @@ def is_textual(kind: Kind) -> bool:
     return kind in TEXTUAL_KINDS
 
 
-#: A phrase standing in for the kind itself. Files that carry no readable text
-#: and no meaningful filename (IMG_4412.HEIC) still need *some* vector, and the
-#: honest one is "this is a photo" — which groups them with the other photos
-#: instead of making each one look like an unrelated stray.
+# Fallback phrases for files without usable text or names.
 KIND_PHRASE: dict[Kind, str] = {
     Kind.IMAGE: "photograph picture image snapshot",
     Kind.VIDEO: "video footage movie clip recording",

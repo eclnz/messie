@@ -6,10 +6,11 @@ import time
 from collections import Counter
 from typing import TYPE_CHECKING
 
-from messie.signals import Finding, ramp, signal
+from messie.result import Finding
+from messie.signals import ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import SignalContext
+    from messie.analyze import SignalContext
 
 _DAY = 86400.0
 
