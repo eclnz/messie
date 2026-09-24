@@ -14,6 +14,7 @@ import pytest
 from conftest import codes, finding, write_blob, write_text
 
 from messie.analyze import analyze_dir
+from messie.result import Verdict
 from messie.scan import read_dir
 
 DAY = 86400.0
@@ -55,7 +56,7 @@ def test_unrelated_topics_fires_on_three_subjects(tmp_path, fake_embedder):
 
     assert "unrelated_topics" in codes(analysis)
     assert len(finding(analysis, "unrelated_topics").data["groups"]) == 3
-    assert analysis.verdict.label in {"messy", "chaotic"}
+    assert analysis.verdict in {Verdict.MESSY, Verdict.CHAOTIC}
 
 
 def test_unrelated_topics_silent_on_one_subject(tmp_path, fake_embedder):
@@ -64,7 +65,7 @@ def test_unrelated_topics_silent_on_one_subject(tmp_path, fake_embedder):
     analysis = analyze_dir(folder, embedder=fake_embedder)
 
     assert "unrelated_topics" not in codes(analysis)
-    assert analysis.verdict.label == "tidy"
+    assert analysis.verdict is Verdict.TIDY
 
 
 def test_same_file_type_is_no_defence(tmp_path, fake_embedder):
@@ -109,7 +110,7 @@ def test_unreadable_files_are_not_strays(tmp_path, fake_embedder):
         write_blob(folder / f"DSC_{100 + i}.jpg", 4000 + i)
     analysis = analyze_dir(folder, embedder=fake_embedder)
     assert "strays" not in codes(analysis)
-    assert analysis.verdict.label == "tidy"
+    assert analysis.verdict is Verdict.TIDY
 
 
 # --- shape ------------------------------------------------------------------

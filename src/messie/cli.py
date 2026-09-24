@@ -17,7 +17,15 @@ from messie.report import (
     render_text,
     supports_colour,
 )
-from messie.score import Verdict
+from messie.result import Verdict
+
+
+def _parse_verdict(text: str) -> Verdict:
+    key = text.strip().upper().replace("-", "_")
+    try:
+        return Verdict[key]
+    except KeyError as exc:
+        raise ValueError(f"unknown verdict {text!r}") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,8 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         return _doctor()
 
     try:
-        min_verdict = Verdict.parse(args.min_verdict)
-        fail_over = Verdict.parse(args.fail_over)
+        min_verdict = _parse_verdict(args.min_verdict)
+        fail_over = _parse_verdict(args.fail_over)
     except ValueError as exc:
         print(f"messie: {exc}", file=sys.stderr)
         return 2

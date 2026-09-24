@@ -65,7 +65,7 @@ from messie.config import DEFAULT_SETTINGS  # noqa: E402
 from messie.embed import get_embedder  # noqa: E402
 from messie.analyze import analyze, profile, vectorize  # noqa: E402
 from messie.scan import read_dir, walk  # noqa: E402
-from messie.score import Verdict  # noqa: E402
+from messie.result import Verdict  # noqa: E402
 
 # --- reports ---------------------------------------------------------------
 

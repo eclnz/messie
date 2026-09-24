@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from collections import Counter
 from dataclasses import dataclass
+import math
 from pathlib import Path
 import re
 from typing import NamedTuple
@@ -18,9 +19,8 @@ from messie.extract import extract_text
 from messie.kinds import Kind, is_textual, kind_phrase
 from messie.label import file_terms, format_label, label_clusters
 from messie.metadata import describe
-from messie.result import DirAnalysis, SkipReason
+from messie.result import DirAnalysis, Finding, SkipReason, Verdict
 from messie.scan import DirContents, FileEntry, read_dir, walk
-from messie.score import score_findings
 from messie.signals import run_all
 from messie.tokens import name_tokens
 
@@ -44,6 +44,30 @@ class Progress:
 
 
 ProgressFn = Callable[[Progress], None]
+
+
+def _verdict_for(score: float) -> Verdict:
+    if score >= 75:
+        return Verdict.CHAOTIC
+    if score >= 50:
+        return Verdict.MESSY
+    if score >= 25:
+        return Verdict.LIVED_IN
+    return Verdict.TIDY
+
+
+def _score_findings(
+    findings: list[Finding], settings: Settings = DEFAULT_SETTINGS
+) -> tuple[float, Verdict]:
+    """Combine signal severities into an overall score and verdict."""
+    residual = 0.0
+    for finding in findings:
+        weight = settings.signal_weights.get(finding.code, 0.3)
+        contribution = max(0.0, min(0.999, weight * finding.severity))
+        residual += math.log1p(-contribution)
+
+    score = round(100.0 * (1.0 - math.exp(residual)), 1)
+    return score, _verdict_for(score)
 
 
 class VectorRecord(NamedTuple):
@@ -226,7 +250,7 @@ def analyze(
         truncated=contents.truncated,
     )
     signal_run = run_all(context)
-    score, verdict = score_findings(signal_run.findings, settings)
+    score, verdict = _score_findings(signal_run.findings, settings)
     return DirAnalysis(
         path=context.path,
         backend=context.backend,

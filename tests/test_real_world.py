@@ -22,7 +22,7 @@ import pytest
 from realdirs import MINIMUM_FOLDERS, coherent_folders
 
 from messie.analyze import analyze_dir
-from messie.score import Verdict
+from messie.result import Verdict
 
 #: Measured at 1.3% (1 of 75) when this was written, down from 16.0% before
 #: `garbled` and `type_soup` were deleted and `misfiled_neighbours` stopped

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 from pathlib import Path
 
-from messie.score import Verdict
+
+class Verdict(IntEnum):
+    """How messy a folder appears from its score."""
+
+    TIDY = 0
+    LIVED_IN = 1
+    MESSY = 2
+    CHAOTIC = 3
 
 
 @dataclass

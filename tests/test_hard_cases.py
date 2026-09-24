@@ -27,7 +27,7 @@ from corpus.build import (
 )
 
 from messie.analyze import analyze_dir
-from messie.score import Verdict
+from messie.result import Verdict
 from messie.tokens import base_stem, name_tokens
 
 BACKEND = "wordllama"

@@ -10,7 +10,7 @@ from conftest import SEMANTIC_BACKENDS, backend_or_skip, snapshot, write_blob, w
 
 from messie.analyze import analyze_dir, analyze_tree
 from messie.scan import read_dir
-from messie.score import Verdict
+from messie.result import Verdict
 
 BACKENDS = SEMANTIC_BACKENDS
 

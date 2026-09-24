@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import pytest
 
+from messie.analyze import _score_findings, _verdict_for
+from messie.cli import _parse_verdict
 from messie.config import DEFAULT_SETTINGS
-from messie.score import Verdict, score_findings, verdict_for
+from messie.result import Verdict
 from messie.signals import Finding, ramp
 
 
@@ -14,7 +16,7 @@ def make(code: str, severity: float) -> Finding:
 
 
 def test_no_findings_is_tidy():
-    assert score_findings([]) == (0.0, Verdict.TIDY)
+    assert _score_findings([]) == (0.0, Verdict.TIDY)
 
 
 def test_severity_is_clamped():
@@ -23,36 +25,36 @@ def test_severity_is_clamped():
 
 
 def test_signals_compound():
-    one = score_findings([make("debris", 0.5)])[0]
-    two = score_findings([make("debris", 0.5), make("type_soup", 0.5)])[0]
+    one = _score_findings([make("debris", 0.5)])[0]
+    two = _score_findings([make("debris", 0.5), make("type_soup", 0.5)])[0]
     assert two > one
 
 
 def test_score_never_exceeds_one_hundred():
     findings = [make(code, 1.0) for code in DEFAULT_SETTINGS.signal_weights]
-    score, verdict = score_findings(findings)
+    score, verdict = _score_findings(findings)
     assert score <= 100.0
     assert verdict == Verdict.CHAOTIC
 
 
 def test_the_flagship_signal_alone_can_reach_messy():
-    score, verdict = score_findings([make("unrelated_topics", 0.55)])
+    score, verdict = _score_findings([make("unrelated_topics", 0.55)])
     assert verdict >= Verdict.MESSY
 
 
 def test_two_unrelated_subjects_is_a_mess_not_a_quirk():
     """Severity the unrelated_topics curve gives two well-separated subjects."""
-    score, verdict = score_findings([make("unrelated_topics", 0.55)])
+    score, verdict = _score_findings([make("unrelated_topics", 0.55)])
     assert 50 <= score < 75
 
 
 def test_weak_signals_alone_do_not_reach_messy():
     findings = [make("debris", 0.3), make("overcrowded", 0.25)]
-    assert score_findings(findings)[1] < Verdict.MESSY
+    assert _score_findings(findings)[1] < Verdict.MESSY
 
 
 def test_unknown_code_still_contributes():
-    assert score_findings([make("made_up", 1.0)])[0] > 0
+    assert _score_findings([make("made_up", 1.0)])[0] > 0
 
 
 @pytest.mark.parametrize(
@@ -62,7 +64,7 @@ def test_unknown_code_still_contributes():
      (75, Verdict.CHAOTIC), (100, Verdict.CHAOTIC)],
 )
 def test_bands(score, expected):
-    assert verdict_for(score) == expected
+    assert _verdict_for(score) == expected
 
 
 def test_verdicts_are_ordered():
@@ -71,12 +73,12 @@ def test_verdicts_are_ordered():
 
 @pytest.mark.parametrize("text", ["tidy", "MESSY", "lived-in", "lived_in", "Chaotic"])
 def test_verdict_parsing(text):
-    assert isinstance(Verdict.parse(text), Verdict)
+    assert isinstance(_parse_verdict(text), Verdict)
 
 
 def test_verdict_parsing_rejects_nonsense():
     with pytest.raises(ValueError):
-        Verdict.parse("spotless")
+        _parse_verdict("spotless")
 
 
 @pytest.mark.parametrize(

@@ -31,9 +31,9 @@ from corpus.build import (
 )
 from corpus.synth import write_empty, write_file, write_plain
 
-from messie.analyze import analyze_dir, analyze_tree
+from messie.analyze import _verdict_for, analyze_dir, analyze_tree
 from messie.embed import get_embedder
-from messie.score import Verdict, verdict_for
+from messie.result import Verdict
 
 FUZZ_FOLDERS = 12
 
@@ -77,7 +77,7 @@ def test_any_folder_yields_a_coherent_verdict(seed, tmp_path, embedder):
     analysis = analyze_dir(_compose(tmp_path / f"fuzz_{seed}", seed), embedder=embedder)
 
     assert 0.0 <= analysis.score <= 100.0
-    assert analysis.verdict == verdict_for(analysis.score)
+    assert analysis.verdict == _verdict_for(analysis.score)
     assert analysis.failed_signals == []
     for finding in analysis.findings:
         assert 0.0 <= finding.severity <= 1.0
@@ -230,9 +230,9 @@ def test_symlinked_loop_does_not_hang(tmp_path, embedder):
 def test_verdict_bands_are_total():
     """Every score lands in exactly one band."""
     for score in range(0, 101):
-        assert isinstance(verdict_for(float(score)), Verdict)
-    assert verdict_for(0.0) == Verdict.TIDY
-    assert verdict_for(100.0) == Verdict.CHAOTIC
+        assert isinstance(_verdict_for(float(score)), Verdict)
+    assert _verdict_for(0.0) == Verdict.TIDY
+    assert _verdict_for(100.0) == Verdict.CHAOTIC
 
 
 def test_permission_denied_directory_is_skipped(tmp_path, embedder):

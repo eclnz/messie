@@ -28,7 +28,7 @@ from corpus.synth import write_file
 
 from messie.analyze import analyze_dir
 from messie.kinds import Kind
-from messie.score import Verdict
+from messie.result import Verdict
 
 #: Subjects that do not hold together even for a semantic backend, and why.
 #: Measured against the example corpus: 34 of 35 topics form a single group.

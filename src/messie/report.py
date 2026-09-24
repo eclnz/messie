@@ -16,14 +16,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from messie.analyze import Progress
-from messie.result import DirAnalysis
-from messie.score import Verdict
+from messie.result import DirAnalysis, Verdict
 
 _COLOURS = {
     Verdict.TIDY: "\033[32m",
     Verdict.LIVED_IN: "\033[36m",
     Verdict.MESSY: "\033[33m",
     Verdict.CHAOTIC: "\033[31m",
+}
+_VERDICT_LABELS = {
+    Verdict.TIDY: "tidy",
+    Verdict.LIVED_IN: "lived-in",
+    Verdict.MESSY: "messy",
+    Verdict.CHAOTIC: "chaotic",
 }
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
@@ -98,7 +103,11 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
             )
         return lines
 
-    badge = _paint(analysis.verdict.label.upper(), _COLOURS[analysis.verdict] + _BOLD, colour)
+    badge = _paint(
+        _VERDICT_LABELS[analysis.verdict].upper(),
+        _COLOURS[analysis.verdict] + _BOLD,
+        colour,
+    )
     score = f"{analysis.score:g}/100"
     meta = _paint(f"{analysis.n_files} files · {analysis.backend}", _DIM, colour)
     lines.append(f"{_paint(_fit(title, 52), _BOLD, colour)} {badge}  {score}   {meta}")
@@ -193,7 +202,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
         "truncated": analysis.truncated,
         "backend": analysis.backend,
         "score": analysis.score,
-        "verdict": analysis.verdict.label,
+        "verdict": _VERDICT_LABELS[analysis.verdict],
         "clusters": analysis.clusters,
         "failed_signals": analysis.failed_signals,
         "findings": [
