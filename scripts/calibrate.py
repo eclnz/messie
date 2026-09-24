@@ -1,42 +1,5 @@
 #!/usr/bin/env python3
-"""Measure what the algorithm actually does, instead of reasoning about it.
-
-Every structural bug in messie so far was found by printing numbers: comparing
-normalised centroids inflated similarity and welded unrelated subjects
-together; the embedder scale was guessed from a four-document probe and was
-badly wrong; a CSV saved as .txt read as gibberish because extraction was
-discarding line breaks. None of that was visible in the code. All of it was
-obvious in a table.
-
-Those measurements used to be throwaway scripts. This is them made permanent,
-so the constants in the source have a derivation anyone can re-run:
-
-    python scripts/calibrate.py                 # everything, default embedder
-    python scripts/calibrate.py --sections unrelated,misfiled
-    python scripts/calibrate.py --json          # for machines
-
-Sections:
-
-    separation   how far apart the corpus subjects are
-    sweep        which clustering threshold best separates them, and the
-                 embedder scale that threshold implies
-    unrelated    where to put ``unrelated_rel``: the point at which two groups
-                 stop being two facets of one subject and start being two
-                 subjects sharing a folder
-    misfiled     where to put ``misfiled_margin_rel``: how much better a
-                 subfolder must fit a file than its own folder does, before
-                 saying so is worth the risk of being wrong
-    realworld    how often real, coherent directories on this machine are
-                 wrongly called messy — the only sample nobody authored to
-                 suit the tool
-
-Each sweep reports a *plateau* as well as a peak. A constant sitting on a cliff
-edge is a constant that will be wrong on the next corpus, so where the optimum
-is flat these prefer its middle to its maximum.
-
-``tests/test_calibration.py`` asserts the shipped constants still match what
-this reports, so they cannot quietly drift back into magic numbers.
-"""
+"""Measure threshold behaviour against fixture and real directories."""
 
 from __future__ import annotations
 
@@ -66,9 +29,6 @@ from messie.embed import get_embedder  # noqa: E402
 from messie.analyze import analyze, profile, vectorize  # noqa: E402
 from messie.scan import read_dir, walk  # noqa: E402
 from messie.result import Verdict  # noqa: E402
-
-# --- reports ---------------------------------------------------------------
-
 
 @dataclass
 class Separation:
@@ -112,8 +72,6 @@ class Sweep:
 
 @dataclass
 class RatioPoint:
-    """One value of a scale-relative ratio, and what it costs on each side."""
-
     ratio: float
     caught: float      # of the cases that should fire, how many did
     false_alarms: float  # of the cases that should stay quiet, how many fired
@@ -123,10 +81,6 @@ class RatioPoint:
         return self.caught + (1.0 - self.false_alarms)
 
 
-#: Below this many at-risk negatives, a false-alarm rate is noise. Both
-#: ratios here were first measured against sets that fell short of it — one of
-#: them against a set of zero — and both times the resulting plateau looked
-#: convincing and meant nothing.
 MIN_NEGATIVES = 20
 
 
@@ -144,16 +98,8 @@ class RatioSweep:
 
     @property
     def inconclusive(self) -> bool:
-        """Too few negatives at risk for the false-alarm column to mean anything.
-
-        A sweep in this state must not move a constant. Its peak is wherever
-        the handful of negatives happened to fall, and following it would trade
-        away real recall to chase noise.
-        """
+        """Whether the sweep has too few negatives."""
         return self.negatives < MIN_NEGATIVES
-
-
-# --- measurement -----------------------------------------------------------
 
 
 def measure_separation(top: int = 6) -> Separation:
@@ -246,29 +192,8 @@ def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep
     )
 
 
-# --- the scale-relative ratios ---------------------------------------------
-#
-# ``cluster_rel`` has its own sweep above, because the clustering cut-off is
-# measurable without running a single signal. The other two only mean anything
-# once a signal has spoken, so they are fitted the same way but against whether
-# the right finding came out: build cases that should fire and cases that
-# should stay quiet, then vary the ratio and count both.
-#
-# Vectors do not depend on either ratio, so every folder is read and embedded
-# once and only ``analyze`` is re-run. That is the difference between a
-# sweep that takes twenty seconds and one nobody bothers to run.
-
-
 def _standard_error(point: RatioPoint, npos: int, nneg: int) -> float:
-    """Sampling error on one point's score, from the two binomial rates.
-
-    The score adds two proportions measured on different samples, so its error
-    is the root of the sum of theirs. It matters: with 60 positives and ~34
-    at-risk negatives, one standard error is around 0.11, and the first version
-    of this sweep called a plateau at a slack of 0.02 — declaring a single
-    point optimal when a dozen neighbouring values were indistinguishable from
-    it. A tolerance tighter than the noise invents precision.
-    """
+    """Sampling error for a two-rate score."""
     def var(p: float, n: int) -> float:
         return p * (1.0 - p) / max(1, n)
 
@@ -276,14 +201,7 @@ def _standard_error(point: RatioPoint, npos: int, nneg: int) -> float:
 
 
 def _plateau_of(points: list[RatioPoint], npos: int, nneg: int) -> tuple[float, float]:
-    """The contiguous run of ratios indistinguishable from the best one.
-
-    "Indistinguishable" means within one standard error of the peak, not within
-    some fixed slack. Reported because the midpoint of a wide plateau is a
-    better constant than the argmax: it is the value that stays right when the
-    corpus changes slightly, and every magic number in messie that had to be
-    fixed twice was a number sitting next to a cliff.
-    """
+    """Return the contiguous near-best range."""
     best = max(points, key=lambda p: p.total)
     slack = _standard_error(best, npos, nneg)
     keep = {p.ratio for p in points if p.total >= best.total - slack}

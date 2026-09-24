@@ -1,7 +1,4 @@
-"""Walking a tree and recording what is in each folder.
-
-Reads metadata only. Nothing here opens a file.
-"""
+"""Scan folder entries without opening files."""
 
 from __future__ import annotations
 
@@ -67,7 +64,6 @@ def read_dir(path: Path, settings: Settings = DEFAULT_SETTINGS) -> DirContents:
 
     for item in raw:
         name = item.name
-        # Hidden dotfiles are deliberate plumbing, not mess, unless asked for.
         if (
             name.startswith(".")
             and not settings.include_hidden
@@ -87,8 +83,7 @@ def read_dir(path: Path, settings: Settings = DEFAULT_SETTINGS) -> DirContents:
         contents.files.append(_entry_for(Path(item.path), st))
 
     if len(contents.files) > settings.max_files_per_dir:
-        # Keep a deterministic, spread-out sample so the verdict stays stable
-        # across runs on folders too big to read whole.
+        # Keep a deterministic sample of oversized folders.
         contents.files.sort(key=lambda f: f.path.name)
         step = len(contents.files) / settings.max_files_per_dir
         kept = [contents.files[int(i * step)] for i in range(settings.max_files_per_dir)]

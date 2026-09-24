@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import re
 
-# Split camel case and acronym-to-word boundaries.
 _CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2,})")
 
-# Preserve Unicode letters and digits; split underscores explicitly.
 _SPLIT_RE = re.compile(r"[\W_]+", re.UNICODE)
 _DIGITS_RE = re.compile(r"^\d+$")
 _HEXISH_RE = re.compile(r"^[0-9a-f]{8,}$", re.IGNORECASE)
 _VERSIONED_RE = re.compile(r"([^\W\d_]+?)v?(\d+)", re.UNICODE)
 _VNUM_RE = re.compile(r"v\d+")
 
-# Revision markers are distinct from ordinary generic words.
 REVISION_WORDS: frozenset[str] = frozenset(
     {
         "final", "finalfinal", "draft", "copy", "copia", "kopie", "backup", "bak",
@@ -24,7 +21,6 @@ REVISION_WORDS: frozenset[str] = frozenset(
     }
 )
 
-# Words that carry no topic signal.
 GENERIC_WORDS: frozenset[str] = frozenset(
     {
         "untitled", "unnamed", "document", "doc", "file", "scan", "scanned",
@@ -38,7 +34,6 @@ GENERIC_WORDS: frozenset[str] = frozenset(
     }
 )
 
-#: Everything stripped from topic signals.
 NOISE_WORDS: frozenset[str] = REVISION_WORDS | GENERIC_WORDS
 
 _MONTHS = frozenset(
@@ -102,7 +97,6 @@ def version_markers(stem: str) -> list[str]:
     """Revision markers present in a filename."""
     words = split_words(stem)
     markers = [w for w in words if _unversion(w) in REVISION_WORDS]
-    # Include standalone version suffixes.
     if any(_VNUM_RE.fullmatch(w) for w in words) or re.search(r"\(\s*\d+\s*\)\s*$", stem):
         markers.append("version-suffix")
     return markers

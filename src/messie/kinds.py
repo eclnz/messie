@@ -1,10 +1,4 @@
-"""What kind of thing a file is, judged from its name.
-
-Kinds group extensions into things a person would name ("a photo", "a
-spreadsheet"). Domains group kinds more coarsely, so that a folder mixing a
-spreadsheet with a slide deck reads as less odd than one mixing a spreadsheet
-with a disk image.
-"""
+"""Classify files from their names."""
 
 from __future__ import annotations
 
@@ -101,15 +95,11 @@ DOMAIN_BY_KIND: dict[Kind, Domain] = {
     Kind.SHORTCUT: Domain.SYSTEM, Kind.JUNK: Domain.SYSTEM, Kind.UNKNOWN: Domain.OTHER,
 }
 
-# Kinds whose contents are worth reading for meaning.
 TEXTUAL_KINDS = frozenset(
     {Kind.DOCUMENT, Kind.PRESENTATION, Kind.SPREADSHEET, Kind.PDF, Kind.EBOOK, Kind.TEXT,
      Kind.CODE, Kind.CONFIG, Kind.NOTEBOOK, Kind.DATA, Kind.SUBTITLE}
 )
 
-# --- clutter patterns ------------------------------------------------------
-
-# Names that mean "this is a leftover", not "this is a file someone wanted".
 DEBRIS_NAME_RE = re.compile(
     r"""^(
         ~\$.*              |   # Office lock files: ~$report.docx
@@ -123,14 +113,12 @@ DEBRIS_NAME_RE = re.compile(
     re.VERBOSE | re.IGNORECASE,
 )
 
-# "Untitled 3.docx", "New Text Document (2).txt", "document1.docx"
 UNNAMED_RE = re.compile(
     r"^(untitled|unnamed|new\s+(text\s+)?(document|folder|file)|document|scan|image|"
     r"download|file)[\s_\-]*\(?\d*\)?$",
     re.IGNORECASE,
 )
 
-# Version-pileup markers, the sediment of "just one more revision".
 VERSION_MARKER_RE = re.compile(
     r"(?:^|[\s_\-.])("
     r"final|final2|finalfinal|fin|draft|rev|revised|revision|version|ver|v\d+|"
@@ -140,7 +128,6 @@ VERSION_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Camera/phone/screenshot names carry no topical meaning at all.
 OPAQUE_NAME_RE = re.compile(
     r"^(img|dsc|dscn|pxl|mvimg|vid|mov|photo|pic|image|screen\s?shot|screenshot|"
     r"capture|snap|scan|untitled|document|received|whatsapp|signal|fb|unnamed)"
@@ -164,7 +151,6 @@ def is_textual(kind: Kind) -> bool:
     return kind in TEXTUAL_KINDS
 
 
-# Fallback phrases for files without usable text or names.
 KIND_PHRASE: dict[Kind, str] = {
     Kind.IMAGE: "photograph picture image snapshot",
     Kind.VIDEO: "video footage movie clip recording",

@@ -56,9 +56,7 @@ class DirAnalysis:
     judged: bool = True
     skip_reason: SkipReason | None = None
     findings: list[Finding] = field(default_factory=list)
-    #: Signals that raised while judging this folder. A crashed signal and a
-    #: quiet one look identical from the outside, so this is carried out to the
-    #: report rather than left in a module-level global.
+    #: Signals that could not run.
     failed_signals: list[str] = field(default_factory=list)
     score: float = 0.0
     verdict: Verdict = Verdict.TIDY

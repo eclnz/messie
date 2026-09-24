@@ -1,12 +1,4 @@
-"""Pulling readable text out of files, cheaply.
-
-Only ever reads the front of a file. Office formats are handled with the
-standard library alone: .docx/.pptx/.xlsx/.epub are zip archives of XML, so
-there is no need for a third-party parser.
-
-Every extractor is best-effort. A file that cannot be read yields "" and the
-caller falls back to the filename.
-"""
+"""Best-effort text extraction."""
 
 from __future__ import annotations
 
@@ -20,12 +12,10 @@ from messie.kinds import is_textual
 from messie.scan import FileEntry
 
 _TAG_RE = re.compile(r"<[^>]+>")
-# Collapse runs of spaces and tabs, but keep newlines. Line structure is part
-# of what a file says: a table is not prose, and flattening it loses that.
+# Keep newlines while normalising inline whitespace.
 _WS_RE = re.compile(r"[^\S\n]+")
 _BLANK_RE = re.compile(r"\n{3,}")
-# OOXML marks paragraph and cell boundaries; turn them into spaces, not nothing,
-# so words from adjacent runs do not get glued together.
+# Preserve markup boundaries between adjacent words.
 _BREAK_RE = re.compile(r"</(w:p|a:p|text:p|p|div|li|tr)\b[^>]*>", re.IGNORECASE)
 _INLINE_BREAK_RE = re.compile(r"</(w:tab|br|td|si)\b[^>]*>", re.IGNORECASE)
 _RTF_CTRL_RE = re.compile(r"\\[a-z]+-?\d*\s?|[{}]", re.IGNORECASE)
@@ -157,9 +147,6 @@ def _from_pdf(path: Path, limit: int) -> str:
     try:
         from pypdf import PdfReader # type: ignore
     except Exception:  # noqa: BLE001
-        # Not just ImportError: pypdf pulls in compiled crypto backends, and a
-        # mismatched one raises from native code at import time. A PDF reader
-        # that cannot load is a missing feature, never a crash.
         return ""
     try:
         reader = PdfReader(str(path))
@@ -169,9 +156,7 @@ def _from_pdf(path: Path, limit: int) -> str:
             if sum(len(c) for c in chunks) >= limit:
                 break
         return _clean(" ".join(chunks), limit)
-    except Exception:
-        # pypdf raises a wide and version-dependent set of errors on damaged
-        # files; an unreadable PDF is a fallback, not a crash.
+    except Exception:  # noqa: BLE001
         return ""
 
 
@@ -188,12 +173,7 @@ def _from_legacy_doc(path: Path, limit: int, max_bytes: int) -> str:
 
 
 def extract_text(entry: FileEntry, settings: Settings = DEFAULT_SETTINGS) -> str:
-    """The prose inside a file, or "" if there is none to be had.
-
-    Files with no prose in them — photographs, archives, fonts — are not this
-    function's business. ``binary_description`` supplies a short fallback for
-    them, and analysis combines the two.
-    """
+    """Return readable text, if any."""
     if entry.size == 0 or not is_textual(entry.kind):
         return ""
 

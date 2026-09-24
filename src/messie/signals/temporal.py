@@ -21,13 +21,7 @@ def _year(ts: float) -> str:
 
 @signal
 def time_strata(analysis: SignalContext) -> list[Finding]:
-    """Distinct eras of stuff, on distinct subjects, in the same folder.
-
-    Both conditions matter. A folder of holiday photos spanning ten years is a
-    photo album, not a mess; it only becomes one when each era is also *about*
-    something different — the signature of a place things get dropped rather
-    than a place things are kept.
-    """
+    """Report distinct topical eras in one folder."""
     clustering = analysis.clustering
     if clustering is None or analysis.n_files < analysis.settings.min_files_to_judge:
         return []
@@ -45,7 +39,6 @@ def time_strata(analysis: SignalContext) -> list[Finding]:
     if len(eras) < 2:
         return []
 
-    # What is each era mostly about?
     dominant: list[int] = []
     for era in eras:
         labels = Counter(int(clustering.labels[i]) for i in era if clustering.labels[i] >= 0)
@@ -53,7 +46,7 @@ def time_strata(analysis: SignalContext) -> list[Finding]:
 
     distinct = len({d for d in dominant if d >= 0})
     if distinct < 2:
-        return []  # same subject over a long time: an archive, not a mess
+        return []
 
     severity = ramp(len(eras), 1, 4) * ramp(distinct, 1, 3) * 0.9
     if severity <= 0:

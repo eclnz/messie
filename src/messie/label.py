@@ -1,13 +1,4 @@
-"""Naming a cluster.
-
-No language model is involved, so messie does not write prose summaries it
-cannot stand behind. Instead each cluster is labelled with the words that are
-common inside it and rare in the rest of the folder — class-based TF-IDF. The
-output is presented as keywords, which is what it is.
-
-When a cluster has no distinctive vocabulary at all (forty photos called
-IMG_4412.HEIC), it says so rather than inventing a theme.
-"""
+"""Label clusters with distinctive keywords."""
 
 from __future__ import annotations
 
@@ -26,8 +17,7 @@ _MIN_SCORE = 0.15
 
 
 def file_terms(stem: str, text: str, *, content_limit: int = 200) -> Counter[str]:
-    """Terms describing one file. Filename words count double — they are the
-    words a person actually chose."""
+    """Terms for one file; names count twice."""
     terms: Counter[str] = Counter()
     for token in name_tokens(stem):
         terms[token] += 2
@@ -57,8 +47,6 @@ def label_clusters(
         support[cid].update(set(terms_per_file[idx]))
         cluster_docs[cid] += 1
 
-    # How many clusters each term shows up in: a term in every cluster
-    # distinguishes nothing.
     spread: Counter[str] = Counter()
     for counts in cluster_terms:
         spread.update(set(counts))

@@ -40,7 +40,6 @@ def run_all(analysis: SignalContext) -> SignalRun:
         try:
             findings.extend(fn(analysis))
         except Exception:
-            # Keep independent signals running; debug mode re-raises.
             if debug:
                 raise
             failed.append(fn.__name__)

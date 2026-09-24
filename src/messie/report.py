@@ -1,10 +1,4 @@
-"""Saying it out loud.
-
-The report states what is in the folder and how strongly that reads as mess.
-It deliberately never suggests a filing scheme, a move, or a deletion: what
-belongs where is the user's call, and messie has no opinion worth having about
-it.
-"""
+"""Render analysis results."""
 
 from __future__ import annotations
 
@@ -55,11 +49,7 @@ def _paint(text: str, code: str, enabled: bool) -> str:
 
 
 def _fit(text: str, width: int) -> str:
-    """Pad or truncate to exactly ``width`` visible characters.
-
-    Padding has to happen before colouring: escape codes count towards a format
-    spec's width but not towards anything the reader can see.
-    """
+    """Pad or truncate uncoloured text to ``width``."""
     if len(text) > width:
         return text[: width - 1] + "…"
     return text.ljust(width)
@@ -147,8 +137,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
             _paint(f"      ({analysis.truncated} further files not read)", _DIM, colour)
         )
     if analysis.failed_signals:
-        # A signal that crashed and a signal that had nothing to say look
-        # identical from out here. Say which happened.
+        # Surface checks that failed instead of treating them as quiet.
         lines.append(
             _paint(
                 "  ! these checks could not run: "
@@ -228,20 +217,9 @@ def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
 
 
 class ProgressPrinter:
-    """Draws a tree walk as it happens, on stderr.
+    """Write tree-walk progress to stderr."""
 
-    stderr because stdout carries the report: ``messie --json -v | jq`` has to
-    keep working, and it only does if the chatter goes somewhere else.
-
-    On a terminal this is one line, rewritten in place. Redirected to a file it
-    becomes one line per folder at a sampled interval, because a log full of
-    carriage returns is not a log. Either way the folder is named before it is
-    read rather than after, so if something in it throws, the last line printed
-    is the folder that did it.
-    """
-
-    #: Rewriting the line faster than this buys nothing a person can see, and
-    #: on a big tree the terminal write costs more than the work it describes.
+    #: Minimum interval between live-terminal updates.
     _MIN_INTERVAL = 0.08
 
     _STAGES = {
@@ -292,12 +270,11 @@ class ProgressPrinter:
     def _where(path: Path | None) -> str:
         if path is None:
             return ""
-        # The tail is the informative part; a full path scrolls the line away.
         parts = path.parts[-3:]
         return "/".join(parts)
 
     def done(self, analyses: list) -> None:
-        """One closing line with what the run actually cost."""
+        """Write a closing summary."""
         elapsed = time.monotonic() - self._started
         judged = sum(1 for a in analyses if getattr(a, "judged", False))
         summary = (

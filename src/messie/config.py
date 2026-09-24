@@ -1,4 +1,4 @@
-"""Tunable thresholds. Every magic number in messie lives here."""
+"""Analysis settings and derived thresholds."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ IGNORE_DIRS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class Settings:
-    # --- scanning -----------------------------------------------------------
     max_depth: int = 3
     include_hidden: bool = False
     follow_symlinks: bool = False
@@ -29,49 +28,27 @@ class Settings:
     ignore_dirs: frozenset[str] = IGNORE_DIRS
     extra_ignores: frozenset[str] = field(default_factory=frozenset)
 
-    # A folder needs some substance before calling it messy means anything.
     min_files_to_judge: int = 6
 
-    # --- content ------------------------------------------------------------
-    # Screening more text takes longer.
     text_excerpt_chars: int = 2500
-    max_read_bytes: int = 1 << 20  # never read more than 1 MiB off disk per file
-    # Below this much extracted text, lean on the filename instead of content.
+    max_read_bytes: int = 1 << 20
     min_text_chars: int = 120
 
-    # How much the content vector counts relative to the filename vector.
     text_weight_rich: float = 0.75
     text_weight_thin: float = 0.45
 
-    # --- clustering ---------------------------------------------------------
-
     cluster_threshold_override: float | None = None
-
-    #: Fitted by ``calibrate.py --sections sweep``: the clustering cut-off that
-    #: best holds corpus subjects together while keeping unrelated ones apart.
     cluster_rel: float = 0.65
-
-    #: Swept by ``calibrate.py --sections unrelated``, and deliberately NOT
-    #: set to what that sweep points at. Worth reading before touching.
     unrelated_rel: float = 0.55
-
-    #: NOT fitted — ``calibrate.py --sections misfiled`` reports it
-    #: inconclusive and refuses to recommend.
     misfiled_margin_rel: float = 0.25
-
-    # A cluster is "meaningful" at 3+ files, or at this share of the folder.
     meaningful_cluster_min: int = 3
     meaningful_cluster_frac: float = 0.10
     near_duplicate_sim: float = 0.97
 
-    # --- signal thresholds --------------------------------------------------
-    #: Off by default, and the only signal that has to be asked for. 
-    # ``-c / --crowding`` turns it on.
     report_crowding: bool = False
     overcrowded_soft_limit: int = 40
     time_strata_gap_days: float = 365.0
 
-    # --- scoring ------------------------------------------------------------
     signal_weights: Mapping[str, float] = field(
         default_factory=lambda: MappingProxyType({
             "unrelated_topics": 1.00,

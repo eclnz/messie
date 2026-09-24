@@ -14,8 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from messie.analyze import SignalContext
 
 
-#: Each additional unrelated subject adds less than the one before it.
-#: Two subjects -> 0.55, three -> 0.80, four -> 0.91.
+# Diminishing contribution from each additional subject.
 _TOPIC_DECAY = 0.45
 
 
@@ -75,7 +74,6 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     covered = sum(len(clustering.groups[cid]) for cid in chosen)
     coverage = covered / max(1, analysis.n_files)
 
-    # More separation produces stronger evidence.
     sim = clustering.group_similarity
     pairs = [sim[a, b] for i, a in enumerate(chosen) for b in chosen[i + 1 :]]
     separation = 1.0 - max(0.0, float(np.mean(pairs))) / max(
@@ -117,7 +115,6 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     ]
 
 
-# Above this share, report that the folder has no common thread.
 _NO_THREAD_SHARE = 0.65
 
 
@@ -217,7 +214,6 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
     if profiles.shape[1] != vectors.shape[1]:
         return []
 
-    # Ignore descendants that match the folder's main subject.
     main = _dominant_subject(analysis)
     if main is not None:
         distinct = np.array([float(p @ main) < analysis.thresholds.unrelated for p in profiles])
