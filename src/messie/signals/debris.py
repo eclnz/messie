@@ -102,20 +102,31 @@ def version_pileups(analysis: SignalContext) -> list[Finding]:
     ]
 
 
-def _digest(path: Path, size: int) -> str | None:
+def _sample_digest(path: Path, size: int) -> str | None:
+    """Hash bounded samples so equal-sized strangers need no full-file read."""
     try:
         with path.open("rb") as fh:
             head = fh.read(_HEAD_BYTES)
-            if size <= _HEAD_BYTES:
-                return hashlib.blake2b(head, digest_size=16).hexdigest()
-            if size <= _FULL_HASH_LIMIT:
-                hasher = hashlib.blake2b(digest_size=16)
-                hasher.update(head)
-                while chunk := fh.read(1 << 20):
-                    hasher.update(chunk)
-                return hasher.hexdigest()
-            # Enormous file: head plus size is evidence enough.
-            return hashlib.blake2b(head, digest_size=16).hexdigest() + f":{size}"
+            hasher = hashlib.blake2b(digest_size=16)
+            hasher.update(size.to_bytes(8, "big"))
+            hasher.update(head)
+            if size > _HEAD_BYTES:
+                fh.seek(max(_HEAD_BYTES, size - _HEAD_BYTES))
+                hasher.update(fh.read(_HEAD_BYTES))
+            return hasher.hexdigest()
+    except OSError:
+        return None
+
+
+def _full_digest(path: Path, size: int, sampled: str) -> str | None:
+    if size <= _HEAD_BYTES or size > _FULL_HASH_LIMIT:
+        return sampled
+    try:
+        hasher = hashlib.blake2b(digest_size=16)
+        with path.open("rb") as fh:
+            while chunk := fh.read(1 << 20):
+                hasher.update(chunk)
+        return hasher.hexdigest()
     except OSError:
         return None
 
@@ -132,12 +143,22 @@ def duplicates(analysis: SignalContext) -> list[Finding]:
     for candidates in by_size.values():
         if len(candidates) < 2:
             continue
-        by_hash: dict[str, list[int]] = defaultdict(list)
+        by_sample: dict[str, list[int]] = defaultdict(list)
         for i in candidates:
-            digest = _digest(analysis.files[i].path, analysis.files[i].size)
-            if digest:
-                by_hash[digest].append(i)
-        groups.extend(members for members in by_hash.values() if len(members) > 1)
+            entry = analysis.files[i]
+            digest = _sample_digest(entry.path, entry.size)
+            if digest is not None:
+                by_sample[digest].append(i)
+        for sampled, possible in by_sample.items():
+            if len(possible) < 2:
+                continue
+            by_hash: dict[str, list[int]] = defaultdict(list)
+            for i in possible:
+                entry = analysis.files[i]
+                digest = _full_digest(entry.path, entry.size, sampled)
+                if digest is not None:
+                    by_hash[digest].append(i)
+            groups.extend(members for members in by_hash.values() if len(members) > 1)
 
     exact_wasted = sum(len(g) - 1 for g in groups)
 

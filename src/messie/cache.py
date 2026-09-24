@@ -16,7 +16,7 @@ from messie.config import Settings
 from messie.scan import FileEntry
 
 _SCHEMA_VERSION = 1
-_EXTRACTION_VERSION = 1
+_EXTRACTION_VERSION = 2
 _MAX_ROWS = 100_000
 _MAX_EMBEDDINGS = 250_000
 

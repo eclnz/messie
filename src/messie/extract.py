@@ -19,6 +19,8 @@ _BLANK_RE = re.compile(r"\n{3,}")
 _BREAK_RE = re.compile(r"</(w:p|a:p|text:p|p|div|li|tr)\b[^>]*>", re.IGNORECASE)
 _INLINE_BREAK_RE = re.compile(r"</(w:tab|br|td|si)\b[^>]*>", re.IGNORECASE)
 _RTF_CTRL_RE = re.compile(r"\\[a-z]+-?\d*\s?|[{}]", re.IGNORECASE)
+_MIN_XML_READ = 16 << 10
+_XML_READ_FACTOR = 12
 
 #: Which member files inside each zip-based format actually hold prose.
 _ZIP_MEMBERS: dict[str, tuple[str, ...]] = {
@@ -44,16 +46,27 @@ def _strip_markup(xml: str) -> str:
     return unescape(_TAG_RE.sub("", _BREAK_RE.sub("\n", spaced)))
 
 
-def _from_zip_xml(path: Path, ext: str, limit: int) -> str:
+def _from_zip_xml(path: Path, ext: str, limit: int, max_bytes: int) -> str:
     wanted = _ZIP_MEMBERS.get(ext, ())
     chunks: list[str] = []
+    remaining = max(0, max_bytes)
     try:
         with zipfile.ZipFile(path) as zf:
             names = zf.namelist()
             members = [n for n in names if any(n.startswith(w) or n.endswith(w) for w in wanted)]
             for member in sorted(members):
+                if remaining == 0:
+                    break
                 try:
-                    raw = zf.read(member).decode("utf-8", errors="replace")
+                    wanted_bytes = max(
+                        _MIN_XML_READ,
+                        (limit - sum(map(len, chunks))) * _XML_READ_FACTOR,
+                    )
+                    read_size = min(remaining, wanted_bytes)
+                    with zf.open(member) as source:
+                        data = source.read(read_size)
+                    remaining -= len(data)
+                    raw = data.decode("utf-8", errors="replace")
                 except (KeyError, OSError, zipfile.BadZipFile):
                     continue
                 chunks.append(_strip_markup(raw))
@@ -143,19 +156,45 @@ def _from_html(path: Path, limit: int, max_bytes: int) -> str:
     return _clean(_strip_markup(body), limit)
 
 
-def _from_pdf(path: Path, limit: int) -> str:
+class _BudgetReader:
+    """Seekable file facade that enforces a cumulative read limit."""
+
+    def __init__(self, source, max_bytes: int) -> None:
+        self._source = source
+        self._remaining = max(0, max_bytes)
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining == 0:
+            return b""
+        allowed = self._remaining if size < 0 else min(size, self._remaining)
+        data = self._source.read(allowed)
+        self._remaining -= len(data)
+        return data
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._source.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._source.tell()
+
+    def seekable(self) -> bool:
+        return True
+
+
+def _from_pdf(path: Path, limit: int, max_bytes: int) -> str:
     try:
         from pypdf import PdfReader # type: ignore
     except Exception:  # noqa: BLE001
         return ""
     try:
-        reader = PdfReader(str(path))
-        chunks = []
-        for page in reader.pages[:5]:
-            chunks.append(page.extract_text() or "")
-            if sum(len(c) for c in chunks) >= limit:
-                break
-        return _clean(" ".join(chunks), limit)
+        with path.open("rb", buffering=0) as source:
+            reader = PdfReader(_BudgetReader(source, max_bytes))
+            chunks = []
+            for page in reader.pages[:5]:
+                chunks.append(page.extract_text() or "")
+                if sum(len(c) for c in chunks) >= limit:
+                    break
+            return _clean(" ".join(chunks), limit)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -181,9 +220,9 @@ def extract_text(entry: FileEntry, settings: Settings = DEFAULT_SETTINGS) -> str
     limit, max_bytes = settings.text_excerpt_chars, settings.max_read_bytes
 
     if ext in _ZIP_MEMBERS:
-        return _from_zip_xml(path, ext, limit)
+        return _from_zip_xml(path, ext, limit, max_bytes)
     if ext == "pdf":
-        return _from_pdf(path, limit)
+        return _from_pdf(path, limit, max_bytes)
     if ext == "rtf":
         return _from_rtf(path, limit, max_bytes)
     if ext in {"html", "htm", "xhtml", "xml"}:

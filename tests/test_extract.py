@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+import types
 import zipfile
 from pathlib import Path
 
 from conftest import write_blob, write_docx, write_text
 
+from messie.config import DEFAULT_SETTINGS
 from messie.extract import extract_text
 from messie.scan import read_dir
 
@@ -74,8 +77,38 @@ def test_xlsx_shared_strings(tmp_path: Path):
 
 
 def test_excerpt_is_capped(tmp_path: Path):
-    from messie.config import DEFAULT_SETTINGS
-
     path = write_text(tmp_path / "long.txt", "word " * 50000)
     settings = DEFAULT_SETTINGS.with_(text_excerpt_chars=200)
     assert len(extract_text(_entry(path), settings)) <= 200
+
+
+def test_zip_document_respects_read_budget(tmp_path: Path):
+    path = tmp_path / "large.docx"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            "<document>" + "x" * 10_000 + "beyond budget" + "</document>",
+        )
+    settings = DEFAULT_SETTINGS.with_(text_excerpt_chars=200, max_read_bytes=512)
+
+    assert "beyond budget" not in extract_text(_entry(path), settings)
+
+
+def test_pdf_parser_receives_a_bounded_reader(tmp_path: Path, monkeypatch):
+    path = tmp_path / "large.pdf"
+    path.write_bytes(b"%PDF" + b"x" * 100)
+    reads: list[int] = []
+
+    class Reader:
+        def __init__(self, stream):
+            reads.append(len(stream.read(100)))
+            reads.append(len(stream.read(100)))
+            self.pages = []
+
+    module = types.ModuleType("pypdf")
+    module.PdfReader = Reader
+    monkeypatch.setitem(sys.modules, "pypdf", module)
+
+    settings = DEFAULT_SETTINGS.with_(max_read_bytes=10)
+    assert extract_text(_entry(path), settings) == ""
+    assert sum(reads) == 10
