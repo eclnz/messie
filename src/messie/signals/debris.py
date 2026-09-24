@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -189,6 +189,33 @@ _MIN_TEXT_FOR_NEAR_DUP = 200
 _COMPARE_CHARS = 2000
 
 
+def _char_counts(text: str) -> Counter[str]:
+    """How many of each character the excerpt holds."""
+    return Counter(text)
+
+
+def _overlap_bound(counts_a: Counter[str], counts_b: Counter[str], total: int) -> float:
+    """Upper bound on ``difflib``'s ratio, from character multisets alone.
+
+    This is exactly ``SequenceMatcher.quick_ratio``, recomputed here for one
+    reason: difflib can only offer it from an instance, and building that
+    instance indexes the whole second string. The same excerpt takes part in
+    many candidate pairs, so difflib re-indexes it once per pair, while the
+    character counts below are built once per file and reused.
+
+    Matching characters cannot exceed what both strings have of each, so a pair
+    scoring below the confirmation bar here cannot reach it in the real
+    comparison either. Verified equal to ``quick_ratio`` on random pairs.
+    """
+    if not counts_a or not counts_b:
+        return 0.0
+    # Walk the smaller multiset; the intersection is the same either way.
+    if len(counts_a) > len(counts_b):
+        counts_a, counts_b = counts_b, counts_a
+    matches = sum(min(n, counts_b[char]) for char, n in counts_a.items())
+    return 2.0 * matches / total
+
+
 def _near_duplicates(analysis: DirAnalysis, already: set[int]) -> list[tuple[int, int]]:
     """Pairs that really are near-identical copies of each other.
 
@@ -206,6 +233,12 @@ def _near_duplicates(analysis: DirAnalysis, already: set[int]) -> list[tuple[int
     pairs = np.argwhere(sim >= threshold)
     out: list[tuple[int, int]] = []
     seen: set[int] = set()
+
+    # Character counts per file, built on first use. A folder of near-identical
+    # config files nominates thousands of pairs drawn from a few dozen files,
+    # so counting each file once instead of once per pair is most of the win.
+    counts: dict[int, Counter[str]] = {}
+
     for a, b in pairs:
         a, b = int(a), int(b)
         if a in already or b in already or b in seen:
@@ -215,7 +248,21 @@ def _near_duplicates(analysis: DirAnalysis, already: set[int]) -> list[tuple[int
         text_a = analysis.texts[a][:_COMPARE_CHARS]
         text_b = analysis.texts[b][:_COMPARE_CHARS]
         if text_a and text_b:
-            if min(len(text_a), len(text_b)) < _MIN_TEXT_FOR_NEAR_DUP:
+            len_a, len_b = len(text_a), len(text_b)
+            if min(len_a, len_b) < _MIN_TEXT_FOR_NEAR_DUP:
+                continue
+            # Two cheap exact upper bounds before the quadratic comparison.
+            # Lengths first, from two integers: matched characters cannot
+            # exceed the shorter excerpt, so excerpts differing in length by
+            # more than half a percent can never reach the bar.
+            total = len_a + len_b
+            if 2.0 * min(len_a, len_b) / total < _TEXT_CONFIRM:
+                continue
+            if a not in counts:
+                counts[a] = _char_counts(text_a)
+            if b not in counts:
+                counts[b] = _char_counts(text_b)
+            if _overlap_bound(counts[a], counts[b], total) < _TEXT_CONFIRM:
                 continue
             if difflib.SequenceMatcher(None, text_a, text_b).ratio() < _TEXT_CONFIRM:
                 continue

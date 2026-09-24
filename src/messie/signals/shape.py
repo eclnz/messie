@@ -19,7 +19,15 @@ if TYPE_CHECKING:  # pragma: no cover
 
 @signal
 def overcrowded(analysis: DirAnalysis) -> list[Finding]:
-    """Far too many things loose in one place."""
+    """Far too many things loose in one place.
+
+    Opt-in: see ``Settings.report_crowding`` for the measurement that made it
+    so. A count is not evidence about contents, and this is the only signal
+    that offers one.
+    """
+    if not analysis.settings.report_crowding:
+        return []
+
     soft = analysis.settings.overcrowded_soft_limit
     n = analysis.n_files + analysis.truncated
     if n <= soft:

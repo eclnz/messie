@@ -114,16 +114,35 @@ def test_unreadable_files_are_not_strays(tmp_path, fake_embedder):
 # --- shape ------------------------------------------------------------------
 
 
-def test_overcrowded(tmp_path, fake_embedder):
+def test_overcrowded_is_silent_unless_asked_for(tmp_path, fake_embedder):
+    """A folder of 120 files on one subject is not a mess, and by default
+    messie says nothing about it. This is the whole argument of the tool: the
+    contents decide, and a count is not a statement about contents."""
     folder = tmp_path / "heap"
     topic_files(folder, "alpha", 120)
-    assert "overcrowded" in codes(analyze_dir(folder, embedder=fake_embedder))
+    assert "overcrowded" not in codes(analyze_dir(folder, embedder=fake_embedder))
 
 
-def test_small_folder_is_not_overcrowded(tmp_path, fake_embedder):
+def test_overcrowded_when_asked_for(tmp_path, fake_embedder):
+    from messie.config import DEFAULT_SETTINGS
+
+    folder = tmp_path / "heap"
+    topic_files(folder, "alpha", 120)
+    analysis = analyze_dir(
+        folder, DEFAULT_SETTINGS.with_(report_crowding=True), embedder=fake_embedder
+    )
+    assert "overcrowded" in codes(analysis)
+
+
+def test_small_folder_is_not_overcrowded_even_when_asked(tmp_path, fake_embedder):
+    from messie.config import DEFAULT_SETTINGS
+
     folder = tmp_path / "small"
     topic_files(folder, "alpha", 10)
-    assert "overcrowded" not in codes(analyze_dir(folder, embedder=fake_embedder))
+    analysis = analyze_dir(
+        folder, DEFAULT_SETTINGS.with_(report_crowding=True), embedder=fake_embedder
+    )
+    assert "overcrowded" not in codes(analysis)
 
 
 # --- leftovers --------------------------------------------------------------

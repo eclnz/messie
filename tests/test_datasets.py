@@ -184,12 +184,27 @@ def test_one_subject_in_many_formats_is_not_a_mess(tmp_path, real_embedder):
     assert analysis.verdict < Verdict.MESSY
 
 
-def test_a_big_folder_of_one_subject_is_crowded_not_incoherent(tmp_path, real_embedder):
+def test_a_big_folder_of_one_subject_is_left_alone(tmp_path, real_embedder):
+    """Ninety documents on one subject: large, and not a mess.
+
+    This used to assert ``overcrowded`` fired, back when size alone counted as
+    evidence. It is the shape of a camera roll or a dataset directory, and on a
+    real workspace that reading was wrong far more often than it was right, so
+    the signal now has to be asked for.
+    """
+    from messie.config import DEFAULT_SETTINGS
+
     folder = build_coherent(tmp_path / "Scans", OFFICE_TOPICS[0], 90)
     analysis = analyze_dir(folder, embedder=real_embedder)
-    assert "overcrowded" in codes(analysis)
+    assert codes(analysis) == set() or "overcrowded" not in codes(analysis)
     assert "unrelated_topics" not in codes(analysis)
     assert "no_common_thread" not in codes(analysis)
+
+    # Asked for, it is still there and still says the true thing.
+    asked = analyze_dir(
+        folder, DEFAULT_SETTINGS.with_(report_crowding=True), embedder=real_embedder
+    )
+    assert "overcrowded" in codes(asked)
 
 
 # --- formats ----------------------------------------------------------------

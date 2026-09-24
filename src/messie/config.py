@@ -114,6 +114,27 @@ class Settings:
     near_duplicate_sim: float = 0.97
 
     # --- signal thresholds --------------------------------------------------
+    #: Off by default, and the only signal that has to be asked for.
+    #:
+    #: ``overcrowded`` is the one signal that never looks inside the files. It
+    #: counts them, which is exactly the judgement messie exists to argue
+    #: against: a folder holding one thing is not a mess for holding a lot of
+    #: it. Measured over a real workspace of 254 judged folders, it fired on 34
+    #: and was the *only* finding on 26 of those — every large one being 100%
+    #: a single kind, one or two extensions, and a single cluster. Camera
+    #: rolls, image datasets, log directories. Sixteen of the 26 were already
+    #: TIDY, so the signal spoke and changed nothing; the other ten it pushed
+    #: to LIVED-IN on no evidence of mess at all.
+    #:
+    #: Where a crowded folder really is a mess, the content signals say so
+    #: independently — in the eight folders here where it fired alongside
+    #: something else, that something else had already made the case. So this
+    #: was carrying almost no unique signal and a lot of noise.
+    #:
+    #: Kept rather than deleted because "this folder has 900 files in it" is a
+    #: fair thing to want to be told; it is just not evidence of mess. ``-c`` /
+    #: ``--crowding`` turns it on.
+    report_crowding: bool = False
     overcrowded_soft_limit: int = 40
     time_strata_gap_days: float = 365.0
 

@@ -44,6 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="quietest verdict worth printing (default: %(default)s)")
     parser.add_argument("--fail-over", default="messy",
                         help="exit 1 when any folder reaches this verdict (default: %(default)s)")
+    parser.add_argument("-c", "--crowding", action="store_true",
+                        help="also report folders holding a lot of files, "
+                             "even when everything in them belongs together")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show the walk as it happens, on stderr")
     parser.add_argument("--no-cache", action="store_true", help="do not read or write the cache")
@@ -95,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = DEFAULT_SETTINGS.with_(
         max_depth=max(0, args.depth),
         include_hidden=args.hidden,
+        report_crowding=args.crowding,
     )
     if args.threshold is not None:
         settings = settings.with_(cluster_threshold_override=args.threshold)

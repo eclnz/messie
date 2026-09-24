@@ -61,6 +61,7 @@ messie ~/Drive --depth 5      # look deeper (default 3)
 messie ~/Downloads --all      # show tidy folders too
 messie ~/Downloads --json     # machine-readable
 messie ~/Drive -v             # watch it work, on stderr
+messie ~/Pictures -c          # also grumble about folders holding a lot of files
 messie --doctor               # which backends are available
 ```
 
@@ -80,7 +81,7 @@ messie ~/Downloads --fail-over chaotic || notify-send "your Downloads folder"
 | **nothing in common** | no organising subject at all: every file about something different |
 | **strays** | files that match nothing else present |
 | **misfiled neighbours** | loose files that read like the contents of a folder further down |
-| **overcrowded** | far too many files loose in one flat folder |
+| **overcrowded** | a lot of files loose in one flat folder — off by default, `-c` turns it on |
 | **debris** | `~$report.docx`, `.crdownload`, `.DS_Store`, zero-byte and never-named files |
 | **version pileups** | `report.docx`, `report_final.docx`, `report_final_v2 (copy).docx` |
 | **duplicates** | byte-identical files, and text that really is the same document twice |
@@ -120,6 +121,24 @@ Every threshold constant is fitted by `scripts/calibrate.py`, which reports a
 plateau as well as a peak and refuses to recommend a value when its sample is
 too small to support one. `misfiled_margin_rel` is currently in that state and
 ships as an admitted guess.
+
+### Why crowding is opt-in
+
+`overcrowded` is the only signal that never opens a file. It counts them — and
+counting is the judgement messie exists to argue against. A folder holding one
+thing is not a mess for holding nine hundred of it.
+
+Measured over a real workspace of 254 judged folders, it fired on 34 and was
+the *only* finding on 26 of them. Every large one was 100% a single kind, one
+or two extensions, one cluster: camera rolls, image datasets, log directories.
+Sixteen were already **tidy**, so it spoke and changed nothing; the other ten
+it nudged to **lived-in** on no evidence of mess at all. In the eight folders
+where it fired alongside something else, that something else had already made
+the case.
+
+So it carries almost no unique signal and a good deal of noise. It is still
+here, because "this folder has 900 files in it" is a fair thing to want to be
+told — it is just not evidence of mess. `-c` / `--crowding` asks for it.
 
 ## Reading the contents
 
@@ -202,10 +221,9 @@ reporting packages for resembling their own subpackages.
   contribute their dimensions and their filenames, nothing more, so two camera
   rolls in one folder read as one thing — which is the intended answer.
 - **Audio and video say nothing beyond their filenames.**
-- **`overcrowded` fires on 13% of real package directories** and
-  `unrelated_topics` on 8%. Those are libraries rather than personal folders,
-  and the thresholds are deliberately not tuned to them, but the numbers are
-  worth knowing.
+- **`unrelated_topics` fires on 8% of real package directories.** Those are
+  libraries rather than personal folders, and the thresholds are deliberately
+  not tuned to them, but the number is worth knowing.
 - **Where the line falls is a judgement call.** Are tax returns and client
   invoices one subject or two? It will usually say one. Tune with `--threshold`
   if your sense of it differs.
