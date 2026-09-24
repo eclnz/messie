@@ -210,8 +210,11 @@ def snapshot(root: Path) -> dict[str, tuple[int, float]]:
 # These lived in three test modules apiece. conftest is already on the import
 # path for every test file, so this is where one copy belongs.
 
-#: Backends that compare meaning, best first.
-SEMANTIC_BACKENDS = ["wordllama", "model2vec", "sentence"]
+#: Backends that compare meaning, best first. One, since model2vec and
+#: sentence-transformers were measured and dropped — see messie/embed. The list
+#: and the parametrisation around it are kept so that adding a candidate
+#: backend means adding a name here, not rebuilding the test suite.
+SEMANTIC_BACKENDS = ["wordllama"]
 
 
 def backend_or_skip(name: str):

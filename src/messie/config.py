@@ -52,16 +52,53 @@ class Settings:
     text_weight_thin: float = 0.45
 
     # --- clustering ---------------------------------------------------------
-    # Backends disagree about what a "high" cosine is: hashed TF-IDF puts
-    # same-topic pairs around 0.15 where a static-embedding model puts them
-    # near 0.40. So thresholds are expressed as fractions of each backend's
-    # own same-topic scale, and one set of numbers works for all of them.
+    # Backends disagree about what a "high" cosine is: hashed TF-IDF put
+    # same-topic pairs around 0.15 where wordllama puts them near 0.40. Only
+    # one backend ships today, so this indirection buys nothing right now —
+    # it is kept because it is what lets a candidate backend be measured
+    # against the incumbent at all. Fixing the cut-offs absolutely would mean
+    # every future comparison ran at a threshold tuned for the wrong model.
+    #
+    # Each ratio below says what it was fitted against; see scripts/calibrate.py.
     #: Pins the clustering cut-off absolutely, overriding the scale-relative
     #: derivation. Set by --threshold.
     cluster_threshold_override: float | None = None
+
+    #: Fitted by ``calibrate.py --sections sweep``: the clustering cut-off that
+    #: best holds corpus subjects together while keeping unrelated ones apart.
     cluster_rel: float = 0.65
+
+    #: Swept by ``calibrate.py --sections unrelated``, and deliberately NOT
+    #: set to what that sweep recommends. Worth reading before touching.
+    #:
+    #: The sweep puts the plateau at 0.20-0.30. At the 0.55 shipped here, 94%
+    #: of the real directories capable of raising ``unrelated_topics`` raise
+    #: it. That sounds damning until you notice it is 7.4% of all real
+    #: directories scanned, which is the 8% the README has always documented
+    #: for package directories and explicitly declines to tune against: they
+    #: are libraries, not the personal folders messie is for, and a big library
+    #: genuinely does hold several subjects.
+    #:
+    #: Moving to the measured plateau costs recall on genuinely mixed folders,
+    #: 98% down to 85%, and the repo's own ground-truth tests are where that
+    #: lands: at 0.30 the canonical "my novel and my tax returns are in one
+    #: folder" case stops being called a mess. That case is the reason this
+    #: tool exists, so the sweep's equal weighting of a miss against a false
+    #: alarm is the wrong objective here, not the wrong measurement.
+    #:
+    #: Left at 0.55 on purpose. The sweep is kept because the trade-off is real
+    #: and worth re-examining if the false-alarm rate on personal folders ever
+    #: gets measured — that is the sample this constant should answer to, and
+    #: it does not exist yet.
     unrelated_rel: float = 0.55
-    stray_rel: float = 0.45
+
+    #: NOT fitted — ``calibrate.py --sections misfiled`` reports it
+    #: inconclusive and refuses to recommend. Only ten real directories on a
+    #: full scan can raise this finding at all, because the dominant-subject
+    #: gate in ``misfiled_neighbours`` already suppresses the rest, so the
+    #: false-alarm column is ten coin flips. The sweep's nominal optimum of
+    #: 0.75 would cost more than half the recall to chase it. Left at the
+    #: original guess until there is a sample worth fitting against.
     misfiled_margin_rel: float = 0.25
 
     # A cluster is "meaningful" at 3+ files, or at this share of the folder.
@@ -115,7 +152,6 @@ class Thresholds:
     scale: float
     cluster: float
     unrelated: float
-    stray: float
     misfiled_margin: float
     near_duplicate: float
 
@@ -134,7 +170,6 @@ class Thresholds:
             scale=scale,
             cluster=cluster,
             unrelated=scale * settings.unrelated_rel * ratio,
-            stray=scale * settings.stray_rel * ratio,
             misfiled_margin=scale * settings.misfiled_margin_rel * ratio,
             near_duplicate=settings.near_duplicate_sim,
         )

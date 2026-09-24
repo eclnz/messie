@@ -93,29 +93,32 @@ being given a score.
 
 ## Backends
 
-Text is embedded by the best backend available, and the report names the one it
-used.
+There is one: `wordllama`, whose weights ship inside the wheel. The report names
+it, and `--backend` still exists so that naming one that isn't installed is an
+error rather than a silent downgrade.
 
-| backend | quality | model download | install |
-|---|---|---|---|
-| `wordllama` | good | **none — weights are in the wheel** | included |
-| `model2vec` | better | once, from Hugging Face | `pip install 'messie[model2vec]'` |
-| `sentence` | best, slowest | once, from Hugging Face | `pip install 'messie[st]'` |
+Three alternatives have been tried and measured away. The numbers are kept in
+`src/messie/embed/__init__.py` so nobody has to rediscover them:
 
-There was once a hashed TF-IDF fallback for machines that could not fetch a
-model. Measured across the example corpus it held only about 71% of subjects
-together against wordllama's 97%, and since wordllama downloads nothing, the
-fallback bought nothing but worse verdicts. It has been removed.
+| backend | verdict |
+|---|---|
+| hashed TF-IDF | held 71% of subjects together against wordllama's 97%, on an older corpus. A fallback for machines that cannot download, when wordllama never downloads. |
+| `model2vec` | significantly worse (P=99.6% by bootstrap), for a speed gain on a stage that takes 25ms. |
+| `sentence` | no better at its own best threshold, and clearly worse at the strict end where messie operates: asked to keep 90% of unrelated pairs apart it holds 59% of subjects together against wordllama's 73%. Costs 30x the runtime and ~400MB of torch, and needs a download. |
 
-Pick one explicitly with `--backend`. Naming a backend that isn't installed is
-an error rather than a silent downgrade: a verdict should never quietly come
-from a weaker model than the one you asked for.
+The last of those is the one worth dwelling on, because it was assumed to be the
+best option for a long time on the strength of being the heaviest. It is not,
+and nothing in the code would have told you so — only running it did.
 
-Thresholds are expressed as fractions of each backend's own similarity scale, so
-one set of settings behaves sensibly across all of them. The `wordllama` scale
-was calibrated by sweeping the threshold through the real pipeline over the
-example corpus; the other two are estimates, since no model was reachable to
-measure them against. Override with `--threshold`.
+Thresholds are expressed as fractions of the backend's own similarity scale.
+With one backend that indirection buys nothing today; it is kept because it is
+what makes a future candidate measurable against the incumbent at all. Override
+with `--threshold`.
+
+Every threshold constant is fitted by `scripts/calibrate.py`, which reports a
+plateau as well as a peak and refuses to recommend a value when its sample is
+too small to support one. `misfiled_margin_rel` is currently in that state and
+ships as an admitted guess.
 
 ## Reading the contents
 
@@ -186,11 +189,14 @@ reporting packages for resembling their own subpackages.
 ## Limitations
 
 - **Static embeddings are coarse.** They compare subject matter, not argument.
-  Measured across the 35-subject example corpus, the default backend keeps 97%
-  of single-subject folders together and 84% of unrelated pairs apart — the
-  remaining 16% are adjacent subjects it files as one. Install
-  `messie[model2vec]` or `messie[st]` for a stronger model if that matters to
-  you; both fetch a model once, so they need the network that first time.
+  Measured across the 37-subject example corpus, the backend keeps 76% of
+  single-subject folders together and 92% of unrelated pairs apart. Heavier
+  models were tried; see Backends for why none of them replaced this one.
+- **One mixed folder in seven goes unremarked.** `unrelated_rel` was refitted
+  against real directories and moved from 0.55 to 0.25, which cut false alarms
+  on coherent folders sharply and cost recall on genuinely mixed ones — 98%
+  down to 85%. That trade weights a miss and a false alarm equally, which is a
+  choice, and `config.py` records where the other end of the plateau sits.
 - **Photographs are taken on trust.** There is no vision model here. Images
   contribute their dimensions and their filenames, nothing more, so two camera
   rolls in one folder read as one thing — which is the intended answer.
@@ -200,16 +206,16 @@ reporting packages for resembling their own subpackages.
   and the thresholds are deliberately not tuned to them, but the numbers are
   worth knowing.
 - **Where the line falls is a judgement call.** Are tax returns and client
-  invoices one subject or two? A semantic backend will usually say one. Tune
-  with `--threshold` if your sense of it differs.
+  invoices one subject or two? It will usually say one. Tune with `--threshold`
+  if your sense of it differs.
 - **Scanned PDFs have no text to read.** There is no OCR.
 - **messie is built for English.** Other Latin-script languages mostly work,
-  but the default backend tends to group non-English documents by language
+  but the backend tends to group non-English documents by language
   rather than by subject, so verdicts on them are unreliable.
 
 ## Example datasets
 
-`tests/corpus/` holds 35 subjects and 210 documents across three domains —
+`tests/corpus/` holds 37 subjects and 222 documents across three domains —
 office paperwork, developer files and personal clutter — together with builders
 that turn any of it into real files of thirty-odd types. `.docx`, `.pptx`,
 `.xlsx`, `.odt`, `.epub`, `.pdf`, `.rtf`, `.ipynb` and the plain-text family
@@ -245,7 +251,7 @@ ruff check src tests
 `MESSIE_DEBUG=1` makes a signal that raises crash instead of being skipped.
 
 The test suite builds real folders on disk and runs the whole pipeline against
-every installed backend. As well as the signals themselves it checks that every
+the real backend. As well as the signals themselves it checks that every
 corpus subject is internally coherent — ground truth the other tests depend on —
 that text survives a round trip through each readable format, that every file
 type is recognised by kind, and that analysing a folder leaves every file in it

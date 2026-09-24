@@ -46,9 +46,17 @@ def _seed_tokenizer(wordllama_cls) -> None:
 
 class WordLlamaEmbedder:
     name = "wordllama"
-    #: Measured against the example corpus in tests/corpus: at the threshold
-    #: this implies, 97% of single-subject folders form exactly one group and
-    #: 84% of two-subject folders stay apart.
+    #: Measured against the example corpus in tests/corpus by
+    #: ``scripts/calibrate.py``: at the threshold this implies (0.26), 76% of
+    #: single-subject folders form exactly one group and 92% of two-subject
+    #: folders stay apart. Pooled over three reshuffles of the pair sample the
+    #: optimum comes out at 0.40 again, so the constant is stable.
+    #:
+    #: An earlier comment here claimed 97% and 84%. Those were true of a
+    #: smaller corpus; the corpus has since roughly doubled and grown harder,
+    #: and the numbers were never re-measured. They are the reason
+    #: ``test_the_shipped_threshold_performs`` asserted a rate the code had not
+    #: met for some time.
     scale = 0.40
 
     def __init__(self, dim: int = 256) -> None:
@@ -56,7 +64,8 @@ class WordLlamaEmbedder:
             from wordllama import WordLlama
         except ImportError as exc:
             raise BackendUnavailable(
-                "wordllama is not installed (pip install messie[semantic])"
+                "wordllama is not installed — it is a hard dependency, so this "
+                "means a broken install (pip install --force-reinstall messie)"
             ) from exc
 
         _seed_tokenizer(WordLlama)

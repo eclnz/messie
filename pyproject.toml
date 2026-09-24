@@ -14,16 +14,16 @@ license = { text = "MIT" }
 dependencies = ["numpy>=1.24", "wordllama>=0.4"]
 
 [project.optional-dependencies]
-# Alternative backends. Both fetch a model once on first use; neither is
-# needed, since the default backend ships with the package.
-model2vec = ["model2vec>=0.3"]
+# There are no alternative-backend extras. model2vec and sentence-transformers
+# were both carried here once; measurement found neither beat wordllama where
+# messie operates, and see messie/embed/__init__.py for the numbers.
+#
 # Reads EXIF, so photographs, scans and screenshots name themselves rather
 # than being three sets of numbers. Images still report their dimensions
 # without it.
 photos = ["pillow>=10.0"]
-st = ["sentence-transformers>=2.2"]
 pdf = ["pypdf>=4.0"]
-all = ["pypdf>=4.0", "model2vec>=0.3", "pillow>=10.0"]
+all = ["pypdf>=4.0", "pillow>=10.0"]
 dev = ["pytest>=7.4", "ruff>=0.4", "pypdf>=4.0"]
 
 [project.scripts]

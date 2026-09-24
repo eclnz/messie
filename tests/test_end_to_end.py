@@ -33,8 +33,8 @@ def test_uniform_file_type_unrelated_contents_is_a_mess(mixed_docx_dir, real_emb
     assert len(topics.data["groups"]) >= 2
 
     # The novel and the tax paperwork must not be judged the same subject.
-    # (How finely the rest divides is the model's call: a semantic backend may
-    # reasonably file invoices and tax returns together as money paperwork.)
+    # (How finely the rest divides is the model's call: it may reasonably file
+    # invoices and tax returns together as money paperwork.)
     def group_of(name: str) -> int:
         index = next(i for i, f in enumerate(analysis.files) if f.name == name)
         return int(analysis.clustering.labels[index])

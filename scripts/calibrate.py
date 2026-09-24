@@ -12,7 +12,7 @@ Those measurements used to be throwaway scripts. This is them made permanent,
 so the constants in the source have a derivation anyone can re-run:
 
     python scripts/calibrate.py                 # everything, default backend
-    python scripts/calibrate.py --backend sentence
+    python scripts/calibrate.py --sections unrelated,misfiled
     python scripts/calibrate.py --json          # for machines
 
 Sections:
@@ -20,9 +20,19 @@ Sections:
     separation   how far apart the corpus subjects are, per backend
     sweep        which clustering threshold best separates them, and the
                  backend scale that threshold implies
+    unrelated    where to put ``unrelated_rel``: the point at which two groups
+                 stop being two facets of one subject and start being two
+                 subjects sharing a folder
+    misfiled     where to put ``misfiled_margin_rel``: how much better a
+                 subfolder must fit a file than its own folder does, before
+                 saying so is worth the risk of being wrong
     realworld    how often real, coherent directories on this machine are
                  wrongly called messy — the only sample nobody authored to
                  suit the tool
+
+Each sweep reports a *plateau* as well as a peak. A constant sitting on a cliff
+edge is a constant that will be wrong on the next corpus, so where the optimum
+is flat these prefer its middle to its maximum.
 
 ``tests/test_calibration.py`` asserts the shipped constants still match what
 this reports, so they cannot quietly drift back into magic numbers.
@@ -54,7 +64,7 @@ from messie.analyze import Engine  # noqa: E402
 from messie.cluster import cluster_vectors  # noqa: E402
 from messie.config import DEFAULT_SETTINGS  # noqa: E402
 from messie.embed import get_embedder  # noqa: E402
-from messie.scan import read_dir  # noqa: E402
+from messie.scan import read_dir, walk  # noqa: E402
 from messie.score import Verdict  # noqa: E402
 
 # --- reports ---------------------------------------------------------------
@@ -98,6 +108,49 @@ class Sweep:
     shipped_scale: float
     best: SweepPoint
     points: list[SweepPoint]
+
+
+@dataclass
+class RatioPoint:
+    """One value of a scale-relative ratio, and what it costs on each side."""
+
+    ratio: float
+    caught: float      # of the cases that should fire, how many did
+    false_alarms: float  # of the cases that should stay quiet, how many fired
+
+    @property
+    def total(self) -> float:
+        return self.caught + (1.0 - self.false_alarms)
+
+
+#: Below this many at-risk negatives, a false-alarm rate is noise. Both
+#: ratios here were first measured against sets that fell short of it — one of
+#: them against a set of zero — and both times the resulting plateau looked
+#: convincing and meant nothing.
+MIN_NEGATIVES = 20
+
+
+@dataclass
+class RatioSweep:
+    name: str
+    backend: str
+    shipped: float
+    best: RatioPoint
+    plateau: tuple[float, float]
+    recommended: float
+    positives: int
+    negatives: int
+    points: list[RatioPoint]
+
+    @property
+    def inconclusive(self) -> bool:
+        """Too few negatives at risk for the false-alarm column to mean anything.
+
+        A sweep in this state must not move a constant. Its peak is wherever
+        the handful of negatives happened to fall, and following it would trade
+        away real recall to chase noise.
+        """
+        return self.negatives < MIN_NEGATIVES
 
 
 # --- measurement -----------------------------------------------------------
@@ -195,6 +248,256 @@ def sweep_threshold(
     )
 
 
+# --- the scale-relative ratios ---------------------------------------------
+#
+# ``cluster_rel`` has its own sweep above, because the clustering cut-off is
+# measurable without running a single signal. The other two only mean anything
+# once a signal has spoken, so they are fitted the same way but against whether
+# the right finding came out: build cases that should fire and cases that
+# should stay quiet, then vary the ratio and count both.
+#
+# Vectors do not depend on either ratio, so every folder is read and embedded
+# once and only ``Engine.analyze`` is re-run. That is the difference between a
+# sweep that takes twenty seconds and one nobody bothers to run.
+
+
+def _standard_error(point: RatioPoint, npos: int, nneg: int) -> float:
+    """Sampling error on one point's score, from the two binomial rates.
+
+    The score adds two proportions measured on different samples, so its error
+    is the root of the sum of theirs. It matters: with 60 positives and ~34
+    at-risk negatives, one standard error is around 0.11, and the first version
+    of this sweep called a plateau at a slack of 0.02 — declaring a single
+    point optimal when a dozen neighbouring values were indistinguishable from
+    it. A tolerance tighter than the noise invents precision.
+    """
+    def var(p: float, n: int) -> float:
+        return p * (1.0 - p) / max(1, n)
+
+    return float(np.sqrt(var(point.caught, npos) + var(point.false_alarms, nneg)))
+
+
+def _plateau_of(points: list[RatioPoint], npos: int, nneg: int) -> tuple[float, float]:
+    """The contiguous run of ratios indistinguishable from the best one.
+
+    "Indistinguishable" means within one standard error of the peak, not within
+    some fixed slack. Reported because the midpoint of a wide plateau is a
+    better constant than the argmax: it is the value that stays right when the
+    corpus changes slightly, and every magic number in messie that had to be
+    fixed twice was a number sitting next to a cliff.
+    """
+    best = max(points, key=lambda p: p.total)
+    slack = _standard_error(best, npos, nneg)
+    keep = {p.ratio for p in points if p.total >= best.total - slack}
+    ordered = [p.ratio for p in points]
+
+    i = j = ordered.index(best.ratio)
+    while i > 0 and ordered[i - 1] in keep:
+        i -= 1
+    while j < len(ordered) - 1 and ordered[j + 1] in keep:
+        j += 1
+    return (round(ordered[i], 3), round(ordered[j], 3))
+
+
+def _summarise(name: str, backend: str, shipped: float, rows, npos: int, nneg: int) -> RatioSweep:
+    points = [
+        RatioPoint(ratio=round(float(r), 3), caught=round(c, 3), false_alarms=round(f, 3))
+        for r, c, f in rows
+    ]
+    plateau = _plateau_of(points, npos, nneg)
+    return RatioSweep(
+        name=name,
+        backend=backend,
+        shipped=shipped,
+        best=max(points, key=lambda p: p.total),
+        plateau=plateau,
+        recommended=round((plateau[0] + plateau[1]) / 2, 2),
+        positives=npos,
+        negatives=nneg,
+        points=points,
+    )
+
+
+def _fires(analysis, code: str) -> bool:
+    return any(f.code == code for f in analysis.findings)
+
+
+def sweep_unrelated(
+    backend: str, *, pairs: int = 60, seed: int = 4, limit: int = 400
+) -> RatioSweep:
+    """Where two groups stop being one subject and start being two.
+
+    ``unrelated_rel`` is the ceiling on the similarity between two cluster
+    centroids, below which they count as unrelated to each other. It decides
+    whether ``unrelated_topics`` speaks at all.
+
+    Both error modes are real and they pull opposite ways. Set it too high and
+    a single subject the clusterer split into facets reads as two subjects
+    cohabiting, which is the false alarm people mind most. Set it too low and a
+    genuine pair of unrelated subjects is waved through as merely adjacent.
+
+    Positives are two-subject folders from the corpus. Negatives are *real*
+    directories — with a caveat that decides how this report should be read:
+    they are package directories, and the project deliberately does not tune to
+    them (see the README). A large library genuinely does hold several
+    subjects, so a finding on one is not straightforwardly wrong. Treat the
+    false-alarm column as an upper bound on the error rate, measured against
+    the least favourable sample available, rather than as a defect count.
+
+    They are used anyway because the synthetic coherent folders cannot serve.
+    At six to eight files none of the 37 splits into two meaningful clusters,
+    so not one is capable of producing this finding at any ratio, and scoring
+    against them would have reported a spotless 0% across the whole range
+    — a flat line that
+    looks like a wide safe plateau and is really a measurement of nothing. Only
+    a folder that actually got split is at risk, so only those are counted, and
+    ``at_risk`` is reported so a vacuous negative set cannot hide again.
+
+    ``limit`` is deliberately several times the 90 the other sections use. Only
+    about one real directory in twelve splits into two meaningful clusters, and
+    a rate over the handful that come out of 90 folders can only ever read 0%,
+    50% or 100% — precise-looking numbers with no information in them.
+    """
+    embedder = get_embedder(backend)
+    topics = list(ALL_TOPICS)
+    tmp = Path(tempfile.mkdtemp(prefix="messie-unrelated-"))
+    base = Engine(embedder=embedder)
+
+    should_fire = []
+    rng = random.Random(seed)
+    combos = list(itertools.combinations(topics, 2))
+    rng.shuffle(combos)
+    for a, b in combos[:pairs]:
+        contents = read_dir(build_mixed(tmp / "two" / f"{a}__{b}", {a: 6, b: 6}))
+        should_fire.append((contents, base.vectorize(contents.files)))
+
+    # Real, coherent directories: one project, one purpose, so any
+    # unrelated_topics finding on one of them is a false alarm.
+    should_not = []
+    for folder in coherent_folders(limit):
+        try:
+            contents = read_dir(folder)
+            if len(contents.files) < DEFAULT_SETTINGS.min_files_to_judge:
+                continue
+            should_not.append((contents, base.vectorize(contents.files)))
+        except Exception:  # noqa: BLE001 - unreadable tree, skip it
+            continue
+
+    rows = []
+    at_risk_seen = 0
+    for ratio in np.arange(0.20, 1.01, 0.05):
+        settings = DEFAULT_SETTINGS.with_(unrelated_rel=float(ratio))
+        engine = Engine(settings, embedder)
+        caught = sum(
+            _fires(engine.analyze(c, {}, r), "unrelated_topics") for c, r in should_fire
+        )
+        at_risk = alarms = 0
+        for c, r in should_not:
+            analysis = engine.analyze(c, {}, r)
+            if analysis.clustering is None or len(analysis.meaningful_clusters()) < 2:
+                continue
+            at_risk += 1
+            alarms += _fires(analysis, "unrelated_topics")
+        at_risk_seen = max(at_risk_seen, at_risk)
+        rows.append((ratio, caught / max(1, len(should_fire)), alarms / max(1, at_risk)))
+
+    return _summarise(
+        "unrelated_rel",
+        backend,
+        DEFAULT_SETTINGS.unrelated_rel,
+        rows,
+        len(should_fire),
+        at_risk_seen,
+    )
+
+
+def sweep_misfiled(backend: str, *, depth: int = 3, limit: int = 400) -> RatioSweep:
+    """How much better a subfolder must fit a file before we say so.
+
+    ``misfiled_margin_rel`` is that margin: a loose file is only called
+    misfiled when some subfolder beats the folder it is sitting in by this
+    much. Zero margin flags anything marginally closer to a subfolder, which on
+    real trees once meant a package flagging its own subpackages — the single
+    largest source of false positives this tool has had.
+
+    Positives come from ``build_nested_misfile``, which buries a subject a few
+    levels down and leaves copies of it loose at the top. Negatives are real
+    directories, the only sample where a false positive costs something and
+    nobody arranged the files to suit us.
+
+    A negative counts as *at risk* only if it fires at a margin of zero. A real
+    directory with no subfolder worth comparing against — two in three of them
+    — cannot produce this finding however the margin is set, and averaging it
+    in would report a reassuring 0% that is really a statement about how many
+    flat directories exist on this machine.
+    """
+    from corpus.build import build_nested_misfile
+
+    embedder = get_embedder(backend)
+    base = Engine(embedder=embedder)
+    tmp = Path(tempfile.mkdtemp(prefix="messie-misfiled-"))
+
+    def prepare(root: Path):
+        """Read and embed one folder plus the profiles of everything below it."""
+        contents = read_dir(root)
+        profiles = {}
+        for sub in walk(root, DEFAULT_SETTINGS):
+            key = sub.path.resolve()
+            if key == root.resolve():
+                continue
+            if len(sub.files) >= DEFAULT_SETTINGS.meaningful_cluster_min:
+                profiles[key] = base.profile(sub.files)
+        return contents, profiles, base.vectorize(contents.files)
+
+    topics = list(ALL_TOPICS)
+    positives = []
+    for i in range(0, len(topics) - 1, 2):
+        root = build_nested_misfile(
+            tmp / f"nest_{topics[i]}", topics[i], topics[i + 1], depth=depth
+        )
+        positives.append(prepare(root))
+
+    candidates = []
+    for folder in coherent_folders(limit):
+        try:
+            contents, profiles, record = prepare(folder)
+        except Exception:  # noqa: BLE001 - unreadable tree, skip it
+            continue
+        if profiles and len(contents.files) >= DEFAULT_SETTINGS.min_files_to_judge:
+            candidates.append((contents, profiles, record))
+
+    # Which of them this signal can reach at all, at the most permissive margin.
+    permissive = Engine(DEFAULT_SETTINGS.with_(misfiled_margin_rel=0.0), embedder)
+    negatives = [
+        case
+        for case in candidates
+        if _fires(permissive.analyze(case[0], case[1], case[2]), "misfiled_neighbours")
+    ]
+
+    rows = []
+    for ratio in np.arange(0.0, 0.81, 0.05):
+        settings = DEFAULT_SETTINGS.with_(misfiled_margin_rel=float(ratio))
+        engine = Engine(settings, embedder)
+        caught = sum(
+            _fires(engine.analyze(c, pr, r), "misfiled_neighbours") for c, pr, r in positives
+        )
+        alarms = sum(
+            _fires(engine.analyze(c, pr, r), "misfiled_neighbours") for c, pr, r in negatives
+        )
+        rows.append(
+            (ratio, caught / max(1, len(positives)), alarms / max(1, len(negatives)))
+        )
+
+    return _summarise(
+        "misfiled_margin_rel",
+        backend,
+        DEFAULT_SETTINGS.misfiled_margin_rel,
+        rows,
+        len(positives),
+        len(negatives),
+    )
+
+
 def measure_real_world(limit: int = 90) -> RealWorld:
     """Judge real directories that were not written for this test.
 
@@ -266,6 +569,43 @@ def _print_sweep(report: Sweep) -> None:
     print("   ok" if drift <= 0.06 else f"   DRIFTED by {drift:.2f} — update the backend")
 
 
+def _print_ratio(report: RatioSweep) -> None:
+    print(f"\n{report.name.upper()} · {report.backend}")
+    print(
+        f"  {report.positives} cases that should fire, "
+        f"{report.negatives} at risk of a false alarm"
+    )
+    print(f"  {'ratio':>7} {'caught':>9} {'false alarms':>14} {'score':>8}")
+    for point in report.points:
+        mark = "  <- best" if point is report.best else ""
+        print(
+            f"  {point.ratio:>7.2f} {point.caught:>8.0%} "
+            f"{point.false_alarms:>13.0%} {point.total:>8.3f}{mark}"
+        )
+    lo, hi = report.plateau
+    error = _standard_error(report.best, report.positives, report.negatives)
+    print(
+        f"  plateau {lo:.2f}-{hi:.2f} (within 1 s.e. = {error:.3f} of the peak), "
+        f"midpoint {report.recommended:.2f}"
+    )
+    if report.inconclusive:
+        print(
+            f"  only {report.negatives} negatives at risk (want {MIN_NEGATIVES}+) — "
+            "the false-alarm column is noise"
+        )
+        print(
+            f"  shipped {report.shipped:.2f}   INCONCLUSIVE — leave it alone until "
+            "there are more negatives to measure against"
+        )
+        return
+    print(f"  shipped {report.shipped:.2f}", end="")
+    drift = abs(report.shipped - report.recommended)
+    if lo <= report.shipped <= hi:
+        print("   ok — on the plateau")
+    else:
+        print(f"   OFF the plateau by {drift:.2f} — update config.py")
+
+
 def _print_real_world(report: RealWorld) -> None:
     print("\nREAL DIRECTORIES (nobody wrote these for us)")
     print(f"  coherent folders judged     {report.judged}")
@@ -295,6 +635,10 @@ def main(argv: list[str] | None = None) -> int:
         out["separation"] = measure_separation(args.backend)
     if "sweep" in wanted:
         out["sweep"] = sweep_threshold(args.backend, pairs=args.pairs)
+    if "unrelated" in wanted:
+        out["unrelated"] = sweep_unrelated(args.backend, pairs=min(args.pairs, 60))
+    if "misfiled" in wanted:
+        out["misfiled"] = sweep_misfiled(args.backend)
     if "realworld" in wanted:
         out["realworld"] = measure_real_world()
 
@@ -308,6 +652,9 @@ def main(argv: list[str] | None = None) -> int:
         _print_separation(out["separation"])  # type: ignore[arg-type]
     if "sweep" in out:
         _print_sweep(out["sweep"])  # type: ignore[arg-type]
+    for key in ("unrelated", "misfiled"):
+        if key in out:
+            _print_ratio(out[key])  # type: ignore[arg-type]
     if "realworld" in out:
         _print_real_world(out["realworld"])  # type: ignore[arg-type]
     print()

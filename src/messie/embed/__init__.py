@@ -1,17 +1,36 @@
 """Turning file text into vectors, locally.
 
-Backends are tried best-first, and every one of them runs on this machine.
+There is one backend. wordllama is a hard dependency rather than one option
+among several, so a backend always exists and it never needs the network — its
+weights and tokenizer ship inside the wheel.
 
-    wordllama   static embeddings, weights ship inside the wheel — no download
-    model2vec   static embeddings, fetches a model once on first use
-    sentence    sentence-transformers, best quality, heaviest
+Three others have been tried and measured away, which is worth recording so
+they are not reinvented:
 
-wordllama is a hard dependency rather than one option among several, so there
-is always a backend and it never needs the network. There was once a hashed
-TF-IDF fallback for machines that could not fetch a model; measured against the
-example corpus it held only about 71% of subjects together against wordllama's
-97%, and since wordllama downloads nothing the fallback bought nothing. A
-second-rate verdict is worse than an honest dependency.
+    lexical     hashed TF-IDF, for machines that could not fetch a model. Held
+                71% of subjects together against wordllama's 97% — an older,
+                smaller corpus than the figures below, so compare it only with
+                the 97%, not with them. Since wordllama downloads nothing, a
+                fallback for machines that cannot download bought nothing.
+    model2vec   significantly worse on the example corpus (sum of held and
+                separated rates 1.605 against 1.649, bootstrap P=99.6%), in
+                exchange for a speed gain nobody can perceive on a stage that
+                takes 25ms.
+    sentence    sentence-transformers. Statistically indistinguishable at its
+                own best threshold (1.611 against 1.649, 95% CI spanning
+                zero), but decisively worse where messie actually operates:
+                asked to keep 90% of unrelated subject pairs apart, it holds
+                59% of real subjects together against wordllama's 73%. It also
+                costs 30x the runtime, ~400MB of torch, and a download on
+                first use — and its optimal scale moved 0.34/0.37/0.43 across
+                three reshuffles of one corpus, a spread wider than the drift
+                tolerance the calibration guard allows, so no stable constant
+                could be shipped for it at all.
+
+``scripts/calibrate.py`` produced those numbers and can reproduce them against
+any new candidate. The Embedder protocol below is the whole contract: a name, a
+scale, and ``encode``. Adding a fourth backend means implementing it, measuring
+it, and beating 1.649 at the strict end of the frontier.
 """
 
 from __future__ import annotations
@@ -21,8 +40,9 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-#: Preference order for automatic selection.
-BACKEND_ORDER: tuple[str, ...] = ("wordllama", "model2vec", "sentence")
+#: Every backend there is. Still a tuple, and still the thing ``--backend``
+#: and ``--doctor`` enumerate, so a second entry costs nothing to reintroduce.
+BACKEND_ORDER: tuple[str, ...] = ("wordllama",)
 
 
 @runtime_checkable
@@ -74,14 +94,6 @@ def _load(name: str) -> Embedder:
         from messie.embed.wordllama_backend import WordLlamaEmbedder
 
         return WordLlamaEmbedder()
-    if name == "model2vec":
-        from messie.embed.model2vec_backend import Model2VecEmbedder
-
-        return Model2VecEmbedder()
-    if name == "sentence":
-        from messie.embed.sentence_backend import SentenceEmbedder
-
-        return SentenceEmbedder()
     raise BackendUnavailable(f"unknown backend {name!r}")
 
 
