@@ -42,3 +42,7 @@ testpaths = ["tests"]
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pyright]
+extraPaths = ["src", "tests", "scripts"]
+
