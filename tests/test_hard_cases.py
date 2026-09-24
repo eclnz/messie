@@ -67,8 +67,7 @@ def test_accents_do_not_break_version_grouping():
 def test_an_accented_subject_reads_as_one_thing(topic, tmp_path, embedder):
     folder = build_coherent(tmp_path / topic, topic, 6)
     analysis = analyze_dir(folder, embedder=embedder)
-    assert analysis.clustering is not None
-    assert analysis.clustering.n_clusters == 1
+    assert analysis.clusters == 1
     assert analysis.verdict < Verdict.MESSY
 
 

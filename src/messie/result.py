@@ -1,15 +1,10 @@
-"""What an analysis produced: the verdict on one folder, and the workings.
-
-This is a data carrier, not a place for logic. The conveniences on
-``DirAnalysis`` exist because nine signals would otherwise each re-derive the
-same things — which cluster is meaningful, what a group is called, when its
-files arrived — from the same raw arrays.
-"""
+"""Internal signal inputs and the compact result returned to callers."""
 
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -32,9 +27,21 @@ class VectorRecord(NamedTuple):
     terms: list[Counter]
 
 
+class SkipReason(str, Enum):
+    """Why a folder was not eligible for a verdict."""
+
+    TOO_FEW_FILES = "too_few_files"
+
+    @property
+    def message(self) -> str:
+        return {
+            SkipReason.TOO_FEW_FILES: "too few files to judge",
+        }[self]
+
+
 @dataclass
-class DirAnalysis:
-    """Everything known about one folder, plus the verdict."""
+class SignalContext:
+    """Evidence and settings a signal needs while judging one folder."""
 
     path: Path
     settings: Settings
@@ -50,18 +57,6 @@ class DirAnalysis:
     child_profiles: dict[Path, np.ndarray] = field(default_factory=dict)
     subdirs: list[Path] = field(default_factory=list)
     truncated: int = 0
-    judged: bool = True
-    skip_reason: str = ""
-    findings: list[Finding] = field(default_factory=list)
-    #: Signals that raised while judging this folder. A crashed signal and a
-    #: quiet one look identical from the outside, so this is carried out to the
-    #: report rather than left in a module-level global.
-    failed_signals: list[str] = field(default_factory=list)
-    score: float = 0.0
-    verdict: Verdict = Verdict.TIDY
-
-    # --- conveniences used by the signals ----------------------------------
-
     @property
     def n_files(self) -> int:
         return len(self.files)
@@ -93,3 +88,24 @@ class DirAnalysis:
             return (0.0, 0.0)
         times = [self.files[i].mtime for i in indices]
         return (min(times), max(times))
+
+
+@dataclass
+class DirAnalysis:
+    """The reportable verdict for one folder."""
+
+    path: Path
+    backend: str
+    n_files: int
+    truncated: int = 0
+    clusters: int = 0
+    meaningful_clusters: int = 0
+    judged: bool = True
+    skip_reason: SkipReason | None = None
+    findings: list[Finding] = field(default_factory=list)
+    #: Signals that raised while judging this folder. A crashed signal and a
+    #: quiet one look identical from the outside, so this is carried out to the
+    #: report rather than left in a module-level global.
+    failed_signals: list[str] = field(default_factory=list)
+    score: float = 0.0
+    verdict: Verdict = Verdict.TIDY

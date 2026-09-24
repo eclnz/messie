@@ -15,14 +15,14 @@ from messie.signals import Finding, ramp, signal
 from messie.tokens import base_stem, version_markers
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import DirAnalysis
+    from messie.result import SignalContext
 
 _HEAD_BYTES = 65536
 _FULL_HASH_LIMIT = 64 << 20  # don't read a 4 GB video twice to prove it's a twin
 
 
 @signal
-def debris(analysis: DirAnalysis) -> list[Finding]:
+def debris(analysis: SignalContext) -> list[Finding]:
     """Leftovers nobody chose to keep: lock files, partial downloads, empties."""
     found: list[tuple[str, str]] = []
     for entry in analysis.files:
@@ -55,7 +55,7 @@ def debris(analysis: DirAnalysis) -> list[Finding]:
 
 
 @signal
-def version_pileups(analysis: DirAnalysis) -> list[Finding]:
+def version_pileups(analysis: SignalContext) -> list[Finding]:
     """Families of near-identical names: report, report_final, report_final_v2 (copy)."""
     families: dict[tuple[str, str], list[int]] = defaultdict(list)
     for i, entry in enumerate(analysis.files):
@@ -120,7 +120,7 @@ def _digest(path: Path, size: int) -> str | None:
 
 
 @signal
-def duplicates(analysis: DirAnalysis) -> list[Finding]:
+def duplicates(analysis: SignalContext) -> list[Finding]:
     """The same content sitting here more than once, under any names."""
     by_size: dict[int, list[int]] = defaultdict(list)
     for i, entry in enumerate(analysis.files):
@@ -216,7 +216,7 @@ def _overlap_bound(counts_a: Counter[str], counts_b: Counter[str], total: int) -
     return 2.0 * matches / total
 
 
-def _near_duplicates(analysis: DirAnalysis, already: set[int]) -> list[tuple[int, int]]:
+def _near_duplicates(analysis: SignalContext, already: set[int]) -> list[tuple[int, int]]:
     """Pairs that really are near-identical copies of each other.
 
     Vectors alone cannot carry this claim: static embeddings blur two documents

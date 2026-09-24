@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING
 from messie.signals import Finding, ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import DirAnalysis
+    from messie.result import SignalContext
 
 
 @signal
-def overcrowded(analysis: DirAnalysis) -> list[Finding]:
+def overcrowded(analysis: SignalContext) -> list[Finding]:
     """Far too many things loose in one place.
 
     Opt-in: see ``Settings.report_crowding`` for the measurement that made it

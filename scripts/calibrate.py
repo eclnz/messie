@@ -397,7 +397,7 @@ def sweep_unrelated(
             analysis = analyze(
                 c, embedder=embedder, settings=settings, child_profiles={}, precomputed=r
             )
-            if analysis.clustering is None or len(analysis.meaningful_clusters()) < 2:
+            if analysis.meaningful_clusters < 2:
                 continue
             at_risk += 1
             alarms += _fires(analysis, "unrelated_topics")

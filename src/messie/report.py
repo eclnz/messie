@@ -93,7 +93,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
         if opts.show_all:
             lines.append(
                     f"{title:<44} {_paint(chr(8212), _DIM, colour)}  "
-                f"{_paint(analysis.skip_reason, _DIM, colour)}"
+                f"{_paint(analysis.skip_reason.message if analysis.skip_reason else '', _DIM, colour)}"
             )
         return lines
 
@@ -187,13 +187,13 @@ def to_dict(analysis: DirAnalysis) -> dict:
     return {
         "path": str(analysis.path),
         "judged": analysis.judged,
-        "skip_reason": analysis.skip_reason,
+        "skip_reason": analysis.skip_reason.value if analysis.skip_reason else None,
         "files": analysis.n_files,
         "truncated": analysis.truncated,
         "backend": analysis.backend,
         "score": analysis.score,
         "verdict": analysis.verdict.label,
-        "clusters": (analysis.clustering.n_clusters if analysis.clustering else 0),
+        "clusters": analysis.clusters,
         "failed_signals": analysis.failed_signals,
         "findings": [
             {

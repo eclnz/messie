@@ -15,7 +15,7 @@ import numpy as np
 from messie.signals import Finding, ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import DirAnalysis
+    from messie.result import SignalContext
 
 
 #: Each additional unrelated subject adds less than the one before it.
@@ -27,7 +27,7 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def _dominant_subject(analysis: DirAnalysis) -> np.ndarray | None:
+def _dominant_subject(analysis: SignalContext) -> np.ndarray | None:
     """The mean vector of this folder's largest meaningful cluster.
 
     What the folder is mostly *about*, as distinct from the average of
@@ -44,7 +44,7 @@ def _dominant_subject(analysis: DirAnalysis) -> np.ndarray | None:
     return analysis.vectors[members].mean(axis=0)
 
 
-def _relative(folder: Path, analysis: DirAnalysis) -> str:
+def _relative(folder: Path, analysis: SignalContext) -> str:
     """A subfolder named the way a person would say it: Archive/2023/Taxes."""
     try:
         return str(folder.resolve().relative_to(analysis.path.resolve()))
@@ -52,7 +52,7 @@ def _relative(folder: Path, analysis: DirAnalysis) -> str:
         return folder.name
 
 
-def _unrelated_set(analysis: DirAnalysis, candidates: list[int]) -> list[int]:
+def _unrelated_set(analysis: SignalContext, candidates: list[int]) -> list[int]:
     """Largest-first greedy pick of clusters that are unrelated to each other."""
     clustering = analysis.clustering
     assert clustering is not None
@@ -68,7 +68,7 @@ def _unrelated_set(analysis: DirAnalysis, candidates: list[int]) -> list[int]:
 
 
 @signal
-def unrelated_topics(analysis: DirAnalysis) -> list[Finding]:
+def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     clustering = analysis.clustering
     if clustering is None or clustering.n_clusters < 2:
         return []
@@ -136,7 +136,7 @@ def unrelated_topics(analysis: DirAnalysis) -> list[Finding]:
 _NO_THREAD_SHARE = 0.65
 
 
-def _judgeable(analysis: DirAnalysis) -> np.ndarray:
+def _judgeable(analysis: SignalContext) -> np.ndarray:
     """Files with enough content to say whether they belong with anything.
 
     A photo we cannot open and a one-line note are uninformative, not
@@ -154,7 +154,7 @@ def _judgeable(analysis: DirAnalysis) -> np.ndarray:
     )
 
 
-def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
+def _loose_fraction(analysis: SignalContext) -> tuple[float, np.ndarray]:
     """Share of judgeable files belonging to no group worth the name.
 
     Returns the fraction and the indices of the files we could actually judge.
@@ -169,7 +169,7 @@ def _loose_fraction(analysis: DirAnalysis) -> tuple[float, np.ndarray]:
 
 
 @signal
-def unattached_files(analysis: DirAnalysis) -> list[Finding]:
+def unattached_files(analysis: SignalContext) -> list[Finding]:
     """Files belonging to no group here — a few of them, or all of them.
 
     This is what ``unrelated_topics`` cannot see. That signal needs groups to
@@ -236,7 +236,7 @@ def unattached_files(analysis: DirAnalysis) -> list[Finding]:
 
 
 @signal
-def misfiled_neighbours(analysis: DirAnalysis) -> list[Finding]:
+def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
     """Loose files that read like the contents of a folder somewhere below.
 
     Not only the immediate children: people file things away several levels

@@ -1,6 +1,6 @@
 """The individual things that make a folder messy.
 
-Each signal inspects a finished :class:`~messie.result.DirAnalysis` and returns
+Each signal inspects a :class:`~messie.result.SignalContext` and returns
 zero or more findings. A finding states what was observed and how strongly,
 never what to do about it — messie reports mess, it does not tidy.
 
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import DirAnalysis
+    from messie.result import SignalContext
 
 
 @dataclass
@@ -51,7 +51,7 @@ class SignalRun(NamedTuple):
     failed: list[str]
 
 
-SignalFn = Callable[["DirAnalysis"], list[Finding]]
+SignalFn = Callable[["SignalContext"], list[Finding]]
 
 _REGISTRY: list[SignalFn] = []
 
@@ -62,7 +62,7 @@ def signal(fn: SignalFn) -> SignalFn:
     return fn
 
 
-def run_all(analysis: DirAnalysis) -> SignalRun:
+def run_all(analysis: SignalContext) -> SignalRun:
     """Every registered signal, strongest first."""
     debug = bool(os.environ.get("MESSIE_DEBUG"))
     findings: list[Finding] = []

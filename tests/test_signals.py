@@ -14,6 +14,7 @@ import pytest
 from conftest import codes, finding, write_blob, write_text
 
 from messie.analyze import analyze_dir
+from messie.scan import read_dir
 
 DAY = 86400.0
 
@@ -73,7 +74,7 @@ def test_same_file_type_is_no_defence(tmp_path, fake_embedder):
         topic_files(folder, marker, 4, ext="docx")
     analysis = analyze_dir(folder, embedder=fake_embedder)
 
-    assert {f.ext for f in analysis.files} == {"docx"}
+    assert {f.ext for f in read_dir(folder).files} == {"docx"}
     assert "unrelated_topics" in codes(analysis)
 
 

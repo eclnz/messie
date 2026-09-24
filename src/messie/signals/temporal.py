@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from messie.signals import Finding, ramp, signal
 
 if TYPE_CHECKING:  # pragma: no cover
-    from messie.result import DirAnalysis
+    from messie.result import SignalContext
 
 _DAY = 86400.0
 
@@ -19,7 +19,7 @@ def _year(ts: float) -> str:
 
 
 @signal
-def time_strata(analysis: DirAnalysis) -> list[Finding]:
+def time_strata(analysis: SignalContext) -> list[Finding]:
     """Distinct eras of stuff, on distinct subjects, in the same folder.
 
     Both conditions matter. A folder of holiday photos spanning ten years is a

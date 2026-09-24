@@ -28,7 +28,7 @@ from messie.extract import extract_text
 from messie.kinds import Kind, is_textual, kind_phrase
 from messie.label import file_terms, label_clusters
 from messie.metadata import describe
-from messie.result import DirAnalysis, VectorRecord
+from messie.result import DirAnalysis, SignalContext, SkipReason, VectorRecord
 from messie.scan import DirContents, FileEntry
 from messie.score import score_findings
 from messie.signals import run_all
@@ -150,29 +150,47 @@ def analyze(
     thresholds = Thresholds.derive(
         embedder.scale, settings, settings.cluster_threshold_override
     )
-    analysis = DirAnalysis(
+    if len(contents.files) < settings.min_files_to_judge:
+        return DirAnalysis(
+            path=contents.path,
+            backend=embedder.name,
+            n_files=len(contents.files),
+            truncated=contents.truncated,
+            judged=False,
+            skip_reason=SkipReason.TOO_FEW_FILES,
+        )
+
+    record = precomputed or vectorize(contents.files, embedder=embedder, settings=settings)
+    clustering = cluster_vectors(record.vectors, thresholds.cluster)
+    context = SignalContext(
         path=contents.path,
         settings=settings,
         thresholds=thresholds,
         backend=embedder.name,
         files=list(contents.files),
+        texts=record.texts,
+        vectors=record.vectors,
+        topical=record.topical,
+        terms=record.terms,
+        clustering=clustering,
+        cluster_labels=label_clusters(
+            clustering.labels, record.terms, clustering.n_clusters
+        ),
         subdirs=list(contents.subdirs),
         truncated=contents.truncated,
         child_profiles=child_profiles or {},
     )
-
-    if len(contents.files) < settings.min_files_to_judge:
-        analysis.judged = False
-        analysis.skip_reason = f"only {len(contents.files)} files — too few to call it anything"
-        return analysis
-
-    record = precomputed or vectorize(contents.files, embedder=embedder, settings=settings)
-    analysis.texts, analysis.vectors, analysis.topical, analysis.terms = record
-    analysis.clustering = cluster_vectors(record.vectors, thresholds.cluster)
-    analysis.cluster_labels = label_clusters(
-        analysis.clustering.labels, record.terms, analysis.clustering.n_clusters
+    signal_run = run_all(context)
+    score, verdict = score_findings(signal_run.findings, settings)
+    return DirAnalysis(
+        path=contents.path,
+        backend=embedder.name,
+        n_files=context.n_files,
+        truncated=contents.truncated,
+        clusters=clustering.n_clusters,
+        meaningful_clusters=len(context.meaningful_clusters()),
+        findings=signal_run.findings,
+        failed_signals=signal_run.failed,
+        score=score,
+        verdict=verdict,
     )
-
-    analysis.findings, analysis.failed_signals = run_all(analysis)
-    analysis.score, analysis.verdict = score_findings(analysis.findings, settings)
-    return analysis
