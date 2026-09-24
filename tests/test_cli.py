@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+from pathlib import Path
 
 import pytest
 from conftest import snapshot, write_blob
@@ -80,6 +82,89 @@ def test_all_flag_shows_tidy_folders(tmp_path, capsys):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     _, out = run([str(folder), "--all", "--no-color"], capsys)
     assert "TIDY" in out
+
+
+def test_short_depth_and_all_flags(tmp_path, capsys):
+    folder = tmp_path / "album"
+    for i in range(12):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+    _, out = run(["-a", "-d", "0", str(folder), "--no-color"], capsys)
+    assert "TIDY" in out
+
+
+def test_quoted_glob_expands_to_multiple_roots(tmp_path, capsys):
+    for name in ("left", "right"):
+        folder = tmp_path / name
+        for i in range(6):
+            write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    code, out = run([str(tmp_path / "*"), "-a", "--json"], capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert [Path(item["root"]).name for item in payload["roots"]] == ["left", "right"]
+
+
+def test_file_glob_analyzes_its_containing_folder(tmp_path, capsys):
+    for i in range(6):
+        (tmp_path / f"note-{i}.txt").write_text("one coherent subject " * 20)
+
+    _, out = run([str(tmp_path / "*.txt"), "-a", "--json"], capsys)
+    payload = json.loads(out)
+
+    assert payload["root"] == str(tmp_path.resolve())
+
+
+def test_dash_reads_newline_delimited_paths(tmp_path, capsys, monkeypatch):
+    folder = tmp_path / "folder with spaces"
+    for i in range(6):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{folder}\n"))
+
+    _, out = run(["-", "-a", "--json"], capsys)
+
+    assert json.loads(out)["root"] == str(folder.resolve())
+
+
+def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
+    roots = []
+    for name in ("one", "two"):
+        folder = tmp_path / name
+        roots.append(folder)
+        for i in range(6):
+            write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\0".join(map(str, roots)) + "\0"))
+
+    code, out = run(["-0", "-", "-a", "--jsonl"], capsys)
+    records = [json.loads(line) for line in out.splitlines()]
+
+    assert code == 0
+    assert {Path(record["root"]).name for record in records} == {"one", "two"}
+    assert all("path" in record and "verdict" in record for record in records)
+
+
+def test_quiet_mode_uses_only_exit_status(messy_tree, capsys):
+    code, out = run([str(messy_tree), "-q"], capsys)
+    assert code == 1
+    assert out == ""
+
+
+def test_json_omits_unjudged_folders_without_all(tmp_path, capsys):
+    (tmp_path / "only.txt").write_text("too small")
+    _, out = run([str(tmp_path), "--json"], capsys)
+    assert json.loads(out)["folders"] == []
+
+
+def test_all_handles_multiple_tidy_folders(tmp_path, capsys):
+    for parent in (tmp_path, tmp_path / "child"):
+        for i in range(6):
+            write_blob(parent / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    code, out = run([str(tmp_path), "-a", "--no-color"], capsys)
+
+    assert code == 0
+    assert out.count("TIDY") == 2
+    assert "0 of 2 folders are a mess" in out
 
 
 def test_unavailable_embedder_is_an_error(tmp_path, capsys, monkeypatch):

@@ -87,9 +87,10 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
 
     if not analysis.judged:
         if opts.show_all:
+            reason = analysis.skip_reason.message if analysis.skip_reason else ""
             lines.append(
-                    f"{title:<44} {_paint(chr(8212), _DIM, colour)}  "
-                f"{_paint(analysis.skip_reason.message if analysis.skip_reason else '', _DIM, colour)}"
+                f"{title:<44} {_paint(chr(8212), _DIM, colour)}  "
+                f"{_paint(reason, _DIM, colour)}"
             )
         return lines
 
@@ -173,13 +174,23 @@ def render_text(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
 
     out = "\n\n".join(blocks)
     if len(judged) > 1:
-        worst = max(flagged, key=lambda a: a.score)
+        worst = max(shown, key=lambda a: a.score)
         summary = (
             f"{len(flagged)} of {len(judged)} folders are a mess — "
             f"worst is {_display_path(worst.path, opts.root)} at {worst.score:g}."
         )
         out += "\n\n" + _paint(summary, _BOLD, opts.colour)
     return out
+
+
+def visible_analyses(
+    analyses: list[DirAnalysis], opts: RenderOptions
+) -> list[DirAnalysis]:
+    """Results selected for machine-readable output."""
+    judged = [analysis for analysis in analyses if analysis.judged]
+    if opts.show_all:
+        return judged
+    return [analysis for analysis in judged if analysis.verdict >= opts.min_verdict]
 
 
 def to_dict(analysis: DirAnalysis) -> dict:
@@ -211,9 +222,17 @@ def to_dict(analysis: DirAnalysis) -> dict:
 def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
     payload = {
         "root": str(opts.root),
-        "folders": [to_dict(a) for a in analyses],
+        "folders": [to_dict(a) for a in visible_analyses(analyses, opts)],
     }
     return json.dumps(payload, indent=2, default=str)
+
+
+def render_json_lines(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
+    """One compact JSON object per selected folder."""
+    return "\n".join(
+        json.dumps({"root": str(opts.root), **to_dict(analysis)}, default=str)
+        for analysis in visible_analyses(analyses, opts)
+    )
 
 
 class ProgressPrinter:
