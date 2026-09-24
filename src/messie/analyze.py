@@ -80,6 +80,16 @@ class VectorRecord(NamedTuple):
     terms: list[Counter]
 
 
+class PreparedRecord(NamedTuple):
+    """Extracted and tokenized evidence awaiting embedding."""
+
+    files: list[FileEntry]
+    texts: list[str]
+    names: list[str]
+    kinds: list[str]
+    terms: list[Counter]
+
+
 @dataclass
 class SignalContext:
     """Evidence and settings a signal needs while judging one folder."""
@@ -171,14 +181,12 @@ def _mix_for(entry: FileEntry, text: str, name: str, settings: Settings) -> Mix:
     return _MIX_KIND
 
 
-def vectorize(
+def _prepare(
     files: list[FileEntry],
     *,
-    embedder: Embedder,
     settings: Settings = DEFAULT_SETTINGS,
     cache: EvidenceCache | None = None,
-) -> VectorRecord:
-    """Turn scanned files into the evidence needed by signals."""
+) -> PreparedRecord:
     texts: list[str] = []
     for file in files:
         text = cache.get(file) if cache is not None else None
@@ -188,9 +196,51 @@ def vectorize(
                 cache.put(file, text)
         texts.append(text)
     names = _name_phrases(files)
-    text_vectors = embedder.encode(texts)
-    name_vectors = embedder.encode(names)
-    kind_vectors = embedder.encode([kind_phrase(file.kind) for file in files])
+    kinds = [kind_phrase(file.kind) for file in files]
+    terms = [file_terms(file.stem, text) for file, text in zip(files, texts, strict=True)]
+    return PreparedRecord(files, texts, names, kinds, terms)
+
+
+def _encode_unique(
+    texts: list[str], embedder: Embedder, cache: EvidenceCache | None
+) -> np.ndarray:
+    """Embed distinct nonblank inputs once, reusing versioned persistent vectors."""
+    unique = list(dict.fromkeys(text for text in texts if text.strip()))
+    if not unique:
+        return embedder.encode(texts)
+
+    model = getattr(embedder, "cache_key", None)
+    cached = cache.get_embeddings(model, unique) if cache is not None and model else {}
+    missing = [text for text in unique if text not in cached]
+    fresh = embedder.encode(missing) if missing else None
+    if fresh is not None and cached:
+        cached_dim = next(iter(cached.values())).size
+        if fresh.shape[1] != cached_dim:
+            cached = {}
+            missing = unique
+            fresh = embedder.encode(missing)
+    if fresh is not None and cache is not None and model:
+        cache.put_embeddings(model, missing, fresh)
+
+    dimensions = fresh.shape[1] if fresh is not None else next(iter(cached.values())).size
+    vectors = np.zeros((len(texts), dimensions), dtype=np.float32)
+    by_text = dict(cached)
+    if fresh is not None:
+        by_text.update(zip(missing, fresh, strict=True))
+    for index, text in enumerate(texts):
+        if text.strip():
+            vectors[index] = by_text[text]
+    return vectors
+
+
+def _compose_record(
+    prepared: PreparedRecord,
+    text_vectors: np.ndarray,
+    name_vectors: np.ndarray,
+    kind_vectors: np.ndarray,
+    settings: Settings,
+) -> VectorRecord:
+    files, texts, names, _kinds, terms = prepared
     vectors = np.zeros((len(files), text_vectors.shape[1]), dtype=np.float32)
     topical = np.zeros(len(files), dtype=bool)
 
@@ -205,8 +255,55 @@ def vectorize(
         )
         topical[index] = bool(text.strip()) or bool(name.strip())
 
-    terms = [file_terms(file.stem, text) for file, text in zip(files, texts, strict=True)]
     return VectorRecord(texts, normalise(vectors), topical, terms)
+
+
+def _vectorize_prepared(
+    prepared: list[PreparedRecord],
+    *,
+    embedder: Embedder,
+    settings: Settings,
+    cache: EvidenceCache | None,
+) -> list[VectorRecord]:
+    """Batch content separately from short name and kind phrases."""
+    lengths = [len(record.files) for record in prepared]
+    all_texts = [text for record in prepared for text in record.texts]
+    all_names = [name for record in prepared for name in record.names]
+    all_kinds = [kind for record in prepared for kind in record.kinds]
+    text_vectors = _encode_unique(all_texts, embedder, cache)
+    short_vectors = _encode_unique([*all_names, *all_kinds], embedder, cache)
+    name_vectors = short_vectors[: len(all_names)]
+    kind_vectors = short_vectors[len(all_names) :]
+
+    records: list[VectorRecord] = []
+    offset = 0
+    for source, length in zip(prepared, lengths, strict=True):
+        end = offset + length
+        records.append(
+            _compose_record(
+                source,
+                text_vectors[offset:end],
+                name_vectors[offset:end],
+                kind_vectors[offset:end],
+                settings,
+            )
+        )
+        offset = end
+    return records
+
+
+def vectorize(
+    files: list[FileEntry],
+    *,
+    embedder: Embedder,
+    settings: Settings = DEFAULT_SETTINGS,
+    cache: EvidenceCache | None = None,
+) -> VectorRecord:
+    """Turn scanned files into the evidence needed by signals."""
+    prepared = _prepare(files, settings=settings, cache=cache)
+    return _vectorize_prepared(
+        [prepared], embedder=embedder, settings=settings, cache=cache
+    )[0]
 
 
 def profile_of(vectors: np.ndarray) -> np.ndarray:
@@ -336,14 +433,19 @@ def _vectorized_profiles(
     """Vectorise each meaningful folder once and derive its profile."""
     records: dict[Path, VectorRecord] = {}
     profiles: dict[Path, np.ndarray] = {}
+    paths: list[Path] = []
+    prepared: list[PreparedRecord] = []
     for done, folder in enumerate(contents, start=1):
         report(Progress("read", done, len(contents), folder.path, len(folder.files)))
         if len(folder.files) < settings.meaningful_cluster_min:
             continue
-        path = folder.path.resolve()
-        records[path] = vectorize(
-            folder.files, embedder=embedder, settings=settings, cache=cache
-        )
+        paths.append(folder.path.resolve())
+        prepared.append(_prepare(folder.files, settings=settings, cache=cache))
+    vectorized = _vectorize_prepared(
+        prepared, embedder=embedder, settings=settings, cache=cache
+    )
+    for path, record in zip(paths, vectorized, strict=True):
+        records[path] = record
         profiles[path] = profile_of(records[path].vectors)
     return records, profiles
 

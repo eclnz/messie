@@ -34,6 +34,8 @@ class WordLlamaEmbedder:
     scale = 0.40
 
     def __init__(self, dim: int = 256) -> None:
+        self.cache_key = f"wordllama:{_CONFIG}:{dim}:v1"
+        self._dim = dim
         try:
             from wordllama import WordLlama
         except ImportError as exc:
@@ -47,5 +49,7 @@ class WordLlamaEmbedder:
 
     def encode(self, texts: list[str]) -> np.ndarray:
         if not texts:
-            return np.zeros((0, 256), dtype=np.float32)
-        return encode_nonblank(texts, lambda batch: self._model.embed(batch, norm=True), 256)
+            return np.zeros((0, self._dim), dtype=np.float32)
+        return encode_nonblank(
+            texts, lambda batch: self._model.embed(batch, norm=True), self._dim
+        )

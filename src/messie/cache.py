@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import sys
@@ -9,12 +10,15 @@ import time
 from pathlib import Path
 from types import TracebackType
 
+import numpy as np
+
 from messie.config import Settings
 from messie.scan import FileEntry
 
 _SCHEMA_VERSION = 1
 _EXTRACTION_VERSION = 1
 _MAX_ROWS = 100_000
+_MAX_EMBEDDINGS = 250_000
 
 
 def _cache_dir() -> Path:
@@ -41,6 +45,7 @@ class EvidenceCache:
         self._settings = _settings_key(settings)
         self._connection: sqlite3.Connection | None = None
         self._pending: dict[tuple[str, int, str, str], str] = {}
+        self._pending_embeddings: dict[tuple[str, bytes], np.ndarray] = {}
         if os.environ.get("MESSIE_NO_CACHE"):
             return
         try:
@@ -58,6 +63,18 @@ class EvidenceCache:
                     settings TEXT NOT NULL,
                     text TEXT NOT NULL,
                     accessed INTEGER NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS embeddings (
+                    model TEXT NOT NULL,
+                    digest BLOB NOT NULL,
+                    vector BLOB NOT NULL,
+                    dimensions INTEGER NOT NULL,
+                    accessed INTEGER NOT NULL,
+                    PRIMARY KEY(model, digest)
                 )
                 """
             )
@@ -88,6 +105,50 @@ class EvidenceCache:
         if self._connection is not None:
             self._pending[self._key(entry)] = text
 
+    @staticmethod
+    def _digest(text: str) -> bytes:
+        return hashlib.sha256(text.encode("utf-8", "replace")).digest()
+
+    def get_embeddings(self, model: str, texts: list[str]) -> dict[str, np.ndarray]:
+        """Return cached vectors for the requested texts, keyed by exact input."""
+        if self._connection is None or not texts:
+            return {}
+        by_digest = {self._digest(text): text for text in texts}
+        found: dict[str, np.ndarray] = {}
+        missing: list[bytes] = []
+        for digest, text in by_digest.items():
+            pending = self._pending_embeddings.get((model, digest))
+            if pending is None:
+                missing.append(digest)
+            else:
+                found[text] = pending
+        try:
+            for start in range(0, len(missing), 400):
+                chunk = missing[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = self._connection.execute(
+                    f"SELECT digest, vector, dimensions FROM embeddings "  # noqa: S608
+                    f"WHERE model=? AND digest IN ({placeholders})",
+                    (model, *chunk),
+                )
+                for digest, blob, dimensions in rows:
+                    vector = np.frombuffer(blob, dtype=np.float32)
+                    if vector.size == dimensions:
+                        found[by_digest[digest]] = vector.copy()
+        except sqlite3.Error:
+            return {}
+        return found
+
+    def put_embeddings(
+        self, model: str, texts: list[str], vectors: np.ndarray
+    ) -> None:
+        if self._connection is None:
+            return
+        for text, vector in zip(texts, vectors, strict=True):
+            self._pending_embeddings[(model, self._digest(text))] = np.asarray(
+                vector, dtype=np.float32
+            ).copy()
+
     def close(self) -> None:
         connection = self._connection
         self._connection = None
@@ -108,6 +169,20 @@ class EvidenceCache:
                 """,
                 ((*key, text, now) for key, text in self._pending.items()),
             )
+            connection.executemany(
+                """
+                INSERT INTO embeddings(model, digest, vector, dimensions, accessed)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(model, digest) DO UPDATE SET
+                    vector=excluded.vector,
+                    dimensions=excluded.dimensions,
+                    accessed=excluded.accessed
+                """,
+                (
+                    (model, digest, vector.tobytes(), vector.size, now)
+                    for (model, digest), vector in self._pending_embeddings.items()
+                ),
+            )
             excess = connection.execute(
                 "SELECT max(count(*) - ?, 0) FROM extracted", (_MAX_ROWS,)
             ).fetchone()
@@ -117,12 +192,22 @@ class EvidenceCache:
                     "(SELECT path FROM extracted ORDER BY accessed LIMIT ?)",
                     (excess[0],),
                 )
+            excess = connection.execute(
+                "SELECT max(count(*) - ?, 0) FROM embeddings", (_MAX_EMBEDDINGS,)
+            ).fetchone()
+            if excess and excess[0]:
+                connection.execute(
+                    "DELETE FROM embeddings WHERE (model, digest) IN "
+                    "(SELECT model, digest FROM embeddings ORDER BY accessed LIMIT ?)",
+                    (excess[0],),
+                )
             connection.commit()
         except sqlite3.Error:
             pass
         finally:
             connection.close()
             self._pending.clear()
+            self._pending_embeddings.clear()
 
     def __enter__(self) -> EvidenceCache:
         return self
