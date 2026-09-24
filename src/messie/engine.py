@@ -21,7 +21,6 @@ from typing import NamedTuple
 
 import numpy as np
 
-from messie.cache import Cache
 from messie.cluster import cluster_vectors
 from messie.config import DEFAULT_SETTINGS, Settings, Thresholds
 from messie.embed import Embedder, get_embedder, normalise
@@ -70,13 +69,12 @@ _WORDS_RE = re.compile(r"[^\W\d_]{3,}")
 
 
 class Engine:
-    """Holds the embedder and cache so a whole tree is analysed with one of each."""
+    """Holds the embedder and derived thresholds for one analysis."""
 
     def __init__(
         self,
         settings: Settings = DEFAULT_SETTINGS,
         embedder: Embedder | None = None,
-        cache: Cache | None = None,
     ) -> None:
         self.settings = settings
         self.embedder = embedder or get_embedder()
@@ -85,11 +83,6 @@ class Engine:
             settings,
             settings.cluster_threshold_override,
         )
-        # The cache holds extracted text, which is the expensive part: reading
-        # and decompressing files off disk. Vectors are not cached; embedding is
-        # cheap next to the disk read.
-        self.cache = cache if cache is not None else Cache(enabled=False)
-
     # --- text ---------------------------------------------------------------
 
     def _text_for(self, entry: FileEntry) -> str:
@@ -100,13 +93,7 @@ class Engine:
         it instead. Keeping the fallback here rather than inside ``extract_text``
         leaves each of those doing one thing.
         """
-        key = Cache.key("text", entry.path, entry.size, entry.mtime)
-        hit = self.cache.get(key)
-        if hit is not None:
-            return hit[1]
-        text = extract_text(entry, self.settings) or describe(entry)
-        self.cache.put(key, np.zeros(1, np.float32), text)
-        return text
+        return extract_text(entry, self.settings) or describe(entry)
 
     # --- vectors ------------------------------------------------------------
 

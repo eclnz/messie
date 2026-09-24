@@ -8,7 +8,6 @@ from pathlib import Path
 
 from messie import __version__
 from messie.analyze import analyze_tree
-from messie.cache import Cache, default_cache_path
 from messie.config import DEFAULT_SETTINGS
 from messie.embed import BACKEND_ORDER, backend_status, get_embedder
 from messie.report import (
@@ -49,7 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
                              "even when everything in them belongs together")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show the walk as it happens, on stderr")
-    parser.add_argument("--no-cache", action="store_true", help="do not read or write the cache")
     parser.add_argument("--no-color", dest="colour", action="store_false", default=None,
                         help="disable coloured output")
     parser.add_argument("--doctor", action="store_true",
@@ -60,7 +58,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _doctor() -> int:
     print(f"messie {__version__}")
-    print(f"cache: {default_cache_path()}")
     print("\nembedding backends, best first:")
     usable = 0
     for name, ok, detail in backend_status():
@@ -114,16 +111,11 @@ def main(argv: list[str] | None = None) -> int:
     if printer is not None:
         print(f"messie {__version__} · {embedder.name} · {root}", file=sys.stderr)
 
-    cache = Cache(enabled=not args.no_cache)
     try:
-        analyses = analyze_tree(
-            root, settings, embedder=embedder, cache=cache, progress=printer
-        )
+        analyses = analyze_tree(root, settings, embedder=embedder, progress=printer)
     except (NotADirectoryError, PermissionError) as exc:
         print(f"messie: {exc}", file=sys.stderr)
         return 2
-    finally:
-        cache.close()
 
     if printer is not None:
         printer.done(analyses)

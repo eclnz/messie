@@ -32,7 +32,6 @@ from corpus.build import (
 from corpus.synth import write_empty, write_file, write_plain
 
 from messie.analyze import analyze_dir, analyze_tree
-from messie.cache import Cache
 from messie.embed import get_embedder
 from messie.score import Verdict, verdict_for
 
@@ -92,19 +91,6 @@ def test_any_folder_is_judged_identically_twice(seed, tmp_path, embedder):
     second = analyze_dir(folder, embedder=embedder)
     assert first.score == second.score
     assert [f.code for f in first.findings] == [f.code for f in second.findings]
-
-
-@pytest.mark.parametrize("seed", range(4))
-def test_the_cache_changes_nothing_but_speed(seed, tmp_path, embedder):
-    folder = _compose(tmp_path / f"fuzz_{seed}", seed)
-    cold = analyze_dir(folder, embedder=embedder, cache=Cache(enabled=False))
-    cache = Cache(tmp_path / "cache.sqlite", enabled=True)
-    try:
-        warm = analyze_dir(folder, embedder=embedder, cache=cache)
-        again = analyze_dir(folder, embedder=embedder, cache=cache)
-    finally:
-        cache.close()
-    assert cold.score == warm.score == again.score
 
 
 @pytest.mark.parametrize("seed", range(FUZZ_FOLDERS))

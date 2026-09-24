@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 
-from messie.cache import Cache
 from messie.config import DEFAULT_SETTINGS, Settings
 from messie.embed import Embedder
 from messie.engine import Engine
@@ -59,14 +58,13 @@ def analyze_dir(
     path: Path | str,
     settings: Settings = DEFAULT_SETTINGS,
     embedder: Embedder | None = None,
-    cache: Cache | None = None,
 ) -> DirAnalysis:
     """Judge a single folder, ignoring what is in its subfolders.
 
     Folders below it are still read, but only to build a profile of each, so
     that loose files here can be recognised as resembling one of them.
     """
-    engine = Engine(settings, embedder, cache)
+    engine = Engine(settings, embedder)
     root = Path(path).expanduser().resolve()
     contents = read_dir(root, settings)
 
@@ -83,11 +81,10 @@ def analyze_tree(
     root: Path | str,
     settings: Settings = DEFAULT_SETTINGS,
     embedder: Embedder | None = None,
-    cache: Cache | None = None,
     progress: ProgressFn | None = None,
 ) -> list[DirAnalysis]:
     """Judge every folder at or under ``root``, worst first."""
-    engine = Engine(settings, embedder, cache)
+    engine = Engine(settings, embedder)
     report: ProgressFn = progress or (lambda _: None)
 
     all_contents = walk(Path(root), settings)
@@ -131,6 +128,5 @@ def analyze_tree(
             engine.analyze(contents, descendants.get(key, {}), records.get(key))
         )
 
-    engine.cache.commit()
     results.sort(key=lambda a: (-a.score, str(a.path)))
     return results

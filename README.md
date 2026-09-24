@@ -153,10 +153,6 @@ meaningful filename — `IMG_4412.HEIC` — is represented by its kind, so it gr
 with the other photos instead of looking like a stray. This is why a folder of
 holiday photos reads as tidy rather than as hundreds of unrelated things.
 
-Extracted text is cached in `~/.cache/messie/`, keyed by path, size and
-modification time, so re-running on a large folder is cheap. `--no-cache` turns
-that off.
-
 ## Reading binaries
 
 Photographs, music and installers cannot be read, so every one of them used to
