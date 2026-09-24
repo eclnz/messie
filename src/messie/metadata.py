@@ -275,7 +275,7 @@ def _describe_image(path: Path) -> str:
     size = _png_size(head) or _jpeg_size(head) or _gif_size(head)
 
     try:
-        from PIL import ExifTags, Image
+        from PIL import ExifTags, Image #type:ignore
     except Exception:  # noqa: BLE001 - optional; dimensions are still worth having
         return size
 

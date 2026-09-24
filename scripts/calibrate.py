@@ -629,7 +629,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     wanted = {s.strip() for s in args.sections.split(",")}
-    out: dict[str, object] = {}
+    out: dict[str, Separation | Sweep | RatioSweep | RealWorld] = {}
 
     if "separation" in wanted:
         out["separation"] = measure_separation(args.backend)

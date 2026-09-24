@@ -37,6 +37,7 @@ def test_uniform_file_type_unrelated_contents_is_a_mess(mixed_docx_dir, real_emb
     # invoices and tax returns together as money paperwork.)
     def group_of(name: str) -> int:
         index = next(i for i, f in enumerate(analysis.files) if f.name == name)
+        assert analysis.clustering is not None
         return int(analysis.clustering.labels[index])
 
     assert group_of("chapter_01.docx") != group_of("tax_return_2019.docx")

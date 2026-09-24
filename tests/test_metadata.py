@@ -285,7 +285,7 @@ def test_unknown_software_is_named_without_a_category():
 
 
 def write_image(path: Path, size: tuple[int, int], tags: dict[str, str]) -> Path:
-    from PIL import ExifTags, Image
+    from PIL import ExifTags, Image #type: ignore
 
     ids = {name: tag for tag, name in ExifTags.TAGS.items()}
     exif = Image.Exif()
@@ -311,7 +311,7 @@ def test_a_photograph_and_a_scan_describe_themselves_differently(tmp_path):
 
 def test_dimensions_alone_when_there_is_no_exif(tmp_path):
     pytest.importorskip("PIL")
-    from PIL import Image
+    from PIL import Image #type: ignore
 
     path = tmp_path / "plain.png"
     Image.new("RGB", (800, 600)).save(path)
