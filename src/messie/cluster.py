@@ -42,27 +42,37 @@ def _closest_similarity(similarity: np.ndarray) -> np.ndarray:
 def _leader_labels(
     vectors: np.ndarray, order: np.ndarray, threshold: float
 ) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
-    labels = np.full(vectors.shape[0], UNCLUSTERED, dtype=np.int32)
-    sums: list[np.ndarray] = []
-    counts: list[int] = []
+    n_vectors, dimensions = vectors.shape
+    labels = np.full(n_vectors, UNCLUSTERED, dtype=np.int32)
+    sums = np.zeros((n_vectors, dimensions), dtype=np.float32)
+    means = np.zeros_like(sums)
+    counts = np.zeros(n_vectors, dtype=np.int32)
+    n_groups = 0
 
     for index in order:
         vector = vectors[index]
         if not vector.any():
             continue
-        if sums:
-            means = np.stack(sums) / np.asarray(counts, dtype=np.float32)[:, None]
-            scores = means @ vector
+        if n_groups:
+            scores = means[:n_groups] @ vector
             closest = int(np.argmax(scores))
             if scores[closest] >= threshold:
                 sums[closest] += vector
                 counts[closest] += 1
+                means[closest] = sums[closest] / np.float32(counts[closest])
                 labels[index] = closest
                 continue
-        sums.append(vector.copy())
-        counts.append(1)
-        labels[index] = len(sums) - 1
-    return labels, sums, counts
+        sums[n_groups] = vector
+        means[n_groups] = vector
+        counts[n_groups] = 1
+        labels[index] = n_groups
+        n_groups += 1
+
+    return (
+        labels,
+        [total.copy() for total in sums[:n_groups]],
+        counts[:n_groups].tolist(),
+    )
 
 
 def _merge_mapping(sums: list[np.ndarray], counts: list[int], threshold: float) -> list[int]:

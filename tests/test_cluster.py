@@ -64,3 +64,12 @@ def test_empty_input():
     result = cluster_vectors(np.zeros((0, 4), dtype=np.float32), 0.5)
     assert len(result.groups) == 0
     assert result.labels.size == 0
+
+
+def test_many_unrelated_vectors_keep_separate_labels():
+    """The leader pass must stay stable when almost every row starts a group."""
+    vectors = np.eye(128, dtype=np.float32)
+    result = cluster_vectors(vectors, 0.5)
+
+    assert len(result.groups) == len(vectors)
+    assert np.array_equal(result.labels, np.arange(len(vectors), dtype=np.int32))
