@@ -30,6 +30,18 @@ def test_signals_compound():
     assert two > one
 
 
+def test_correlated_topic_signals_do_not_double_count():
+    primary = make("unrelated_topics", 0.7)
+    supporting = make("time_strata", 1.0)
+    assert _score_findings([primary, supporting]) == _score_findings([primary])
+
+
+def test_independent_signals_still_compound_with_topic_disorder():
+    topical = make("unrelated_topics", 0.5)
+    with_debris = _score_findings([topical, make("debris", 0.8)])[0]
+    assert with_debris > _score_findings([topical])[0]
+
+
 def test_score_never_exceeds_one_hundred():
     findings = [make(code, 1.0) for code in DEFAULT_SETTINGS.signal_weights]
     score, verdict = _score_findings(findings)

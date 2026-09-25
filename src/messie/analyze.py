@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from collections import Counter
-from dataclasses import dataclass
 import math
-from pathlib import Path
 import re
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -60,11 +60,27 @@ def _verdict_for(score: float) -> Verdict:
 def _score_findings(
     findings: list[Finding], settings: Settings = DEFAULT_SETTINGS
 ) -> tuple[float, Verdict]:
-    """Combine signal severities into an overall score and verdict."""
-    residual = 0.0
+    """Combine signal severities into an overall score and verdict.
+
+    Signals in the same family often describe the same underlying disorder.  Keep
+    the strongest contribution from each family so corroborating detectors do not
+    manufacture confidence by being treated as independent observations.
+    """
+    families = {
+        "unrelated_topics": "topical_disorder",
+        "no_common_thread": "topical_disorder",
+        "strays": "topical_disorder",
+        "time_strata": "topical_disorder",
+    }
+    strongest: dict[str, float] = {}
     for finding in findings:
         weight = settings.signal_weights.get(finding.code, 0.3)
         contribution = max(0.0, min(0.999, weight * finding.severity))
+        family = families.get(finding.code, finding.code)
+        strongest[family] = max(strongest.get(family, 0.0), contribution)
+
+    residual = 0.0
+    for contribution in strongest.values():
         residual += math.log1p(-contribution)
 
     score = round(100.0 * (1.0 - math.exp(residual)), 1)
@@ -148,8 +164,6 @@ class Mix(NamedTuple):
     kind: float
 
 
-_MIX_RICH = Mix(0.75, 0.20, 0.05)
-_MIX_THIN = Mix(0.45, 0.40, 0.15)
 _MIX_NAME = Mix(0.00, 0.80, 0.20)
 _MIX_KIND = Mix(0.00, 0.00, 1.00)
 _MIX_META = Mix(0.85, 0.15, 0.00)
@@ -172,10 +186,17 @@ def _name_phrases(files: list[FileEntry]) -> list[str]:
 def _mix_for(entry: FileEntry, text: str, name: str, settings: Settings) -> Mix:
     if text.strip() and not is_textual(entry.kind) and _WORDS_RE.search(text):
         return _MIX_META
-    if text.strip() and len(text) >= settings.min_text_chars:
-        return _MIX_RICH
     if text.strip():
-        return _MIX_THIN
+        thin_text = max(0.0, min(1.0, settings.text_weight_thin))
+        rich_text = max(0.0, min(1.0, settings.text_weight_rich))
+        thin = Mix(thin_text, (1.0 - thin_text) * 8.0 / 11.0,
+                   (1.0 - thin_text) * 3.0 / 11.0)
+        rich = Mix(rich_text, (1.0 - rich_text) * 4.0 / 5.0,
+                   (1.0 - rich_text) * 1.0 / 5.0)
+        scale = max(1, settings.min_text_chars)
+        progress = min(1.0, len(text) / scale)
+        progress = progress * progress * (3.0 - 2.0 * progress)
+        return Mix(*(a + (b - a) * progress for a, b in zip(thin, rich, strict=True)))
     if name.strip():
         return _MIX_NAME
     return _MIX_KIND
@@ -241,17 +262,23 @@ def _compose_record(
     settings: Settings,
 ) -> VectorRecord:
     files, texts, names, _kinds, terms = prepared
-    vectors = np.zeros((len(files), text_vectors.shape[1]), dtype=np.float32)
+    dimensions = text_vectors.shape[1]
+    # Keeping the evidence sources in orthogonal subspaces prevents accidental
+    # text-to-name and name-to-kind similarities.  Square-root weights make each
+    # configured weight its share of cosine similarity when all sources exist.
+    vectors = np.zeros((len(files), dimensions * 3), dtype=np.float32)
     topical = np.zeros(len(files), dtype=bool)
 
     for index, (entry, text, name) in enumerate(zip(files, texts, names, strict=True)):
         if entry.kind is Kind.JUNK or entry.size == 0:
             continue
         mix = _mix_for(entry, text, name, settings)
-        vectors[index] = (
-            mix.text * text_vectors[index]
-            + mix.name * name_vectors[index]
-            + mix.kind * kind_vectors[index]
+        vectors[index, :dimensions] = math.sqrt(mix.text) * text_vectors[index]
+        vectors[index, dimensions : 2 * dimensions] = (
+            math.sqrt(mix.name) * name_vectors[index]
+        )
+        vectors[index, 2 * dimensions :] = (
+            math.sqrt(mix.kind) * kind_vectors[index]
         )
         topical[index] = bool(text.strip()) or bool(name.strip())
 
