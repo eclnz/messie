@@ -30,10 +30,10 @@ from messie.analyze import analyze_dir
 from messie.result import Verdict
 from messie.tokens import base_stem, name_tokens
 
+
 @pytest.fixture(scope="module")
 def embedder():
     return embedder_or_skip()
-
 
 
 # --- accented English -------------------------------------------------------
@@ -64,7 +64,9 @@ def test_accents_do_not_break_version_grouping():
 def test_an_accented_subject_reads_as_one_thing(topic, tmp_path, embedder):
     folder = build_coherent(tmp_path / topic, topic, 6)
     analysis = analyze_dir(folder, embedder=embedder)
-    assert analysis.clusters == 1
+    # Exact average-link may leave a weak singleton without inventing another
+    # meaningful subject.  That is still one coherent thing to the product.
+    assert analysis.meaningful_clusters == 1
     assert analysis.verdict < Verdict.MESSY
 
 

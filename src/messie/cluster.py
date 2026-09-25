@@ -39,78 +39,135 @@ def _closest_similarity(similarity: np.ndarray) -> np.ndarray:
     return without_self.max(axis=1).astype(np.float32)
 
 
-def _leader_labels(
-    vectors: np.ndarray, order: np.ndarray, threshold: float
-) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
-    n_vectors, dimensions = vectors.shape
-    labels = np.full(n_vectors, UNCLUSTERED, dtype=np.int32)
-    sums = np.zeros((n_vectors, dimensions), dtype=np.float32)
-    means = np.zeros_like(sums)
-    counts = np.zeros(n_vectors, dtype=np.int32)
-    n_groups = 0
+def _nearest_neighbour_chain(
+    similarity: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """Build an average-linkage dendrogram with a nearest-neighbour chain.
 
-    for index in order:
-        vector = vectors[index]
-        if not vector.any():
-            continue
-        if n_groups:
-            scores = means[:n_groups] @ vector
-            closest = int(np.argmax(scores))
-            if scores[closest] >= threshold:
-                sums[closest] += vector
-                counts[closest] += 1
-                means[closest] = sums[closest] / np.float32(counts[closest])
-                labels[index] = closest
-                continue
-        sums[n_groups] = vector
-        means[n_groups] = vector
-        counts[n_groups] = 1
-        labels[index] = n_groups
-        n_groups += 1
+    ``similarity`` contains the pairwise cosine similarities between the
+    non-zero vectors.  The returned arrays describe the internal nodes of the
+    dendrogram: each node joins ``left[node]`` and ``right[node]`` at
+    ``height[node]``.  Average linkage is reducible, so the nearest-neighbour
+    chain algorithm gives the same hierarchy as repeatedly selecting the
+    highest average-link pair while using only O(n²) work and storage.
 
-    return (
-        labels,
-        [total.copy() for total in sums[:n_groups]],
-        counts[:n_groups].tolist(),
-    )
+    The chain's tie-breaking is based on the smallest leaf index.  Callers
+    sort leaves by their vector values first, which makes those indices stable
+    when the input rows are permuted.
+    """
+    n_leaves = similarity.shape[0]
+    n_nodes = max(1, 2 * n_leaves - 1)
+    matrix = np.full((n_nodes, n_nodes), -np.inf, dtype=np.float32)
+    matrix[:n_leaves, :n_leaves] = similarity
+
+    sizes = np.zeros(n_nodes, dtype=np.int32)
+    sizes[:n_leaves] = 1
+    # The key is the smallest original leaf in a cluster.  It is unique for
+    # distinct clusters and gives a stable tie-break independent of merge IDs.
+    keys = np.full(n_nodes, n_leaves, dtype=np.int32)
+    keys[:n_leaves] = np.arange(n_leaves, dtype=np.int32)
+    active = np.zeros(n_nodes, dtype=bool)
+    active[:n_leaves] = True
+
+    left = np.full(n_nodes, -1, dtype=np.int32)
+    right = np.full(n_nodes, -1, dtype=np.int32)
+    height = np.full(n_nodes, -np.inf, dtype=np.float32)
+    chain: list[int] = []
+    merges = 0
+    n_active = n_leaves
+
+    def nearest(cluster: int) -> int:
+        candidates = np.flatnonzero(active)
+        candidates = candidates[candidates != cluster]
+        scores = matrix[cluster, candidates]
+        best_score = scores.max()
+        tied = candidates[scores == best_score]
+        # keys are unique while clusters are active.  The ID fallback keeps
+        # this total and deterministic even for malformed duplicate inputs.
+        return min((int(candidate) for candidate in tied), key=lambda item: (keys[item], item))
+
+    while n_active > 1:
+        if not chain:
+            candidates = np.flatnonzero(active)
+            chain.append(
+                min((int(item) for item in candidates), key=lambda item: (keys[item], item))
+            )
+
+        neighbour = nearest(chain[-1])
+        if len(chain) >= 2 and neighbour == chain[-2]:
+            first, second = chain[-2:]
+            node = n_leaves + merges
+            total = sizes[first] + sizes[second]
+            others = np.flatnonzero(active)
+            others = others[(others != first) & (others != second)]
+
+            left[node] = first
+            right[node] = second
+            height[node] = matrix[first, second]
+            sizes[node] = total
+            keys[node] = min(keys[first], keys[second])
+            if others.size:
+                weight_first = np.float32(sizes[first])
+                weight_second = np.float32(sizes[second])
+                denominator = np.float32(total)
+                matrix[node, others] = (
+                    weight_first * matrix[first, others]
+                    + weight_second * matrix[second, others]
+                ) / denominator
+                matrix[others, node] = matrix[node, others]
+
+            active[first] = False
+            active[second] = False
+            active[node] = True
+            merges += 1
+            n_active -= 1
+            chain = chain[:-2]
+        else:
+            chain.append(neighbour)
+
+    root = n_leaves + merges - 1
+    return left, right, height, root
 
 
-def _merge_mapping(sums: list[np.ndarray], counts: list[int], threshold: float) -> list[int]:
-    """Return a seed-group id to final-group id mapping."""
-    mapping = list(range(len(sums)))
-    live_sums = [total.copy() for total in sums]
-    live_counts = list(counts)
-    remaining = set(range(len(sums)))
+def _cut_dendrogram(
+    left: np.ndarray,
+    right: np.ndarray,
+    height: np.ndarray,
+    root: int,
+    n_leaves: int,
+    threshold: float,
+) -> np.ndarray:
+    """Return stable group labels for a similarity threshold cut."""
+    labels = np.full(n_leaves, UNCLUSTERED, dtype=np.int32)
+    if n_leaves == 0:
+        return labels
+    if n_leaves == 1:
+        labels[0] = 0
+        return labels
 
-    while len(remaining) > 1:
-        ids = sorted(remaining)
-        totals = np.stack([live_sums[index] for index in ids])
-        sizes = np.asarray([live_counts[index] for index in ids], dtype=np.float32)
-        similarity = (totals @ totals.T) / np.outer(sizes, sizes)
-        np.fill_diagonal(similarity, -2.0)
+    groups: list[list[int]] = []
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        if node < n_leaves or height[node] >= threshold:
+            leaves: list[int] = []
+            descendants = [node]
+            while descendants:
+                descendant = descendants.pop()
+                if descendant < n_leaves:
+                    leaves.append(descendant)
+                else:
+                    descendants.append(int(left[descendant]))
+                    descendants.append(int(right[descendant]))
+            groups.append(leaves)
+        else:
+            pending.append(int(left[node]))
+            pending.append(int(right[node]))
 
-        first, second = divmod(int(np.argmax(similarity)), len(ids))
-        if similarity[first, second] < threshold:
-            break
-
-        keep, drop = sorted((ids[first], ids[second]))
-        live_sums[keep] += live_sums[drop]
-        live_counts[keep] += live_counts[drop]
-        remaining.remove(drop)
-        for old, current in enumerate(mapping):
-            if current == drop:
-                mapping[old] = keep
-
-    survivors = sorted(remaining, key=lambda index: (-live_counts[index], index))
-    renumbered = {old: new for new, old in enumerate(survivors)}
-    return [renumbered[current] for current in mapping]
-
-
-def _final_labels(labels: np.ndarray, mapping: list[int]) -> np.ndarray:
-    final = labels.copy()
-    for old, new in enumerate(mapping):
-        final[labels == old] = new
-    return final
+    groups.sort(key=lambda members: min(members))
+    for label, members in enumerate(groups):
+        labels[np.asarray(members, dtype=np.intp)] = label
+    return labels
 
 
 def _groups(labels: np.ndarray) -> tuple[np.ndarray, ...]:
@@ -150,12 +207,26 @@ def cluster_vectors(vectors: np.ndarray, threshold: float) -> Clustering:
     if vectors.shape[0] == 0:
         return _clustering(labels, vectors, similarity, closest)
 
-    without_self = similarity.copy()
-    np.fill_diagonal(without_self, -2.0)
-    centrality = np.where(without_self > threshold, without_self, 0.0).sum(axis=1)
-    order = np.argsort(-centrality, kind="stable")
+    valid = np.flatnonzero(np.any(vectors != 0, axis=1))
+    if valid.size == 0:
+        return _clustering(labels, vectors, similarity, closest)
 
-    labels, sums, counts = _leader_labels(vectors, order, threshold)
-    if sums:
-        labels = _final_labels(labels, _merge_mapping(sums, counts, threshold))
+    # Sort rows by value before clustering.  The internal leaf index is then
+    # independent of the caller's file ordering (apart from indistinguishable
+    # duplicate vectors, whose identities cannot be recovered from values).
+    valid_vectors = vectors[valid]
+    order = np.lexsort((-valid_vectors[:, ::-1]).T)
+    original_indices = valid[order]
+    valid_similarity = similarity[np.ix_(original_indices, original_indices)]
+
+    left, right, height, root = _nearest_neighbour_chain(valid_similarity)
+    sorted_labels = _cut_dendrogram(
+        left,
+        right,
+        height,
+        root,
+        len(original_indices),
+        threshold,
+    )
+    labels[original_indices] = sorted_labels
     return _clustering(labels, vectors, similarity, closest)

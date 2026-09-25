@@ -47,6 +47,52 @@ def test_a_bridging_file_does_not_weld_two_groups():
     assert result.labels[0] != result.labels[3]
 
 
+def test_average_link_cut_uses_mean_pairwise_similarity():
+    """A merged pair must clear the cut based on its average link to a file."""
+    first = np.array([1.0, 0.0, 0.0])
+    second = np.array([0.9, np.sqrt(1.0 - 0.9**2), 0.0])
+    third = np.array(
+        [0.8, (0.5 - 0.9 * 0.8) / second[1], 0.0],
+    )
+    third[2] = np.sqrt(1.0 - np.dot(third, third))
+    vectors = np.asarray([first, second, third], dtype=np.float32)
+
+    result = cluster_vectors(vectors, 0.66)
+
+    assert result.labels[0] == result.labels[1]
+    assert result.labels[2] != result.labels[0]
+    assert result.group_similarity[0, 1] < 0.66
+
+
+def test_partition_is_invariant_under_permutation_with_tied_links():
+    """Ties in centrality or linkage must not depend on row order."""
+    vectors = np.asarray(
+        [
+            [1.0, 0.0, 0.0],
+            [0.8, 0.6, 0.0],
+            [0.8, -0.4, np.sqrt(0.2)],
+        ],
+        dtype=np.float32,
+    )
+    threshold = 0.7
+    expected = {
+        frozenset(group.tolist())
+        for group in cluster_vectors(vectors, threshold).groups
+    }
+
+    for permutation in (
+        np.asarray([2, 0, 1], dtype=np.intp),
+        np.asarray([1, 2, 0], dtype=np.intp),
+        np.asarray([0, 2, 1], dtype=np.intp),
+    ):
+        result = cluster_vectors(vectors[permutation], threshold)
+        actual = {
+            frozenset(permutation[group].tolist())
+            for group in result.groups
+        }
+        assert actual == expected
+
+
 def test_zero_vectors_join_nothing():
     vectors = np.array([[1, 0], [1, 0], [0, 0]], dtype=np.float32)
     result = cluster_vectors(vectors, 0.5)
@@ -73,3 +119,15 @@ def test_many_unrelated_vectors_keep_separate_labels():
 
     assert len(result.groups) == len(vectors)
     assert np.array_equal(result.labels, np.arange(len(vectors), dtype=np.int32))
+
+
+def test_two_thousand_vectors_remain_practical():
+    """The configured upper bound should complete without quadratic Python state."""
+    rng = np.random.default_rng(20260925)
+    vectors = rng.normal(size=(2_000, 16)).astype(np.float32)
+    vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+
+    result = cluster_vectors(vectors, 0.8)
+
+    assert result.labels.shape == (2_000,)
+    assert sum(len(group) for group in result.groups) == 2_000
