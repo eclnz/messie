@@ -123,7 +123,6 @@ def to_dict(analysis: DirAnalysis) -> dict:
         "skip_reason": analysis.skip_reason.value if analysis.skip_reason else None,
         "files": analysis.n_files,
         "truncated": analysis.truncated,
-        "embedder": analysis.embedder,
         "score": analysis.score,
         "verdict": _VERDICT_LABELS[analysis.verdict],
         "clusters": analysis.clusters,

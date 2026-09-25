@@ -45,6 +45,7 @@ def test_json_output_is_valid_and_complete(messy_tree, capsys):
 
     assert payload["root"] == str(messy_tree.resolve())
     folder = payload["folders"][0]
+    assert "embedder" not in folder
     assert folder["verdict"] in {"tidy", "lived-in", "messy", "chaotic"}
     assert 0 <= folder["score"] <= 100
     assert any(f["code"] == "unrelated_topics" for f in folder["findings"])
@@ -143,6 +144,7 @@ def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
     assert code == 0
     assert {Path(record["root"]).name for record in records} == {"one", "two"}
     assert all("path" in record and "verdict" in record for record in records)
+    assert all("embedder" not in record for record in records)
 
 
 def test_quiet_mode_uses_only_exit_status(messy_tree, capsys):
