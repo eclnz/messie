@@ -109,11 +109,15 @@ def render_text(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
 def visible_analyses(
     analyses: list[DirAnalysis], opts: RenderOptions
 ) -> list[DirAnalysis]:
-    """Results selected for machine-readable output."""
+    """Select findings by default and all judged folders only on request."""
     judged = [analysis for analysis in analyses if analysis.judged]
     if opts.show_all:
         return judged
-    return [analysis for analysis in judged if analysis.verdict >= opts.min_verdict]
+    return [
+        analysis
+        for analysis in judged
+        if analysis.findings and analysis.verdict >= opts.min_verdict
+    ]
 
 
 def to_dict(analysis: DirAnalysis) -> dict:

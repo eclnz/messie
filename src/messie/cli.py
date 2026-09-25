@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-a", "--all", dest="show_all", action="store_true",
-        help="write one record for every judged folder",
+        help="include judged folders that have no findings",
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(

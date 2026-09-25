@@ -159,6 +159,32 @@ def test_json_omits_unjudged_folders_without_all(tmp_path, capsys):
     assert json.loads(out)["folders"] == []
 
 
+def test_json_hides_empty_findings_unless_all(tmp_path, capsys):
+    folder = tmp_path / "album"
+    for i in range(12):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    _, out = run([str(folder), "--json", "--min-verdict", "tidy"], capsys)
+    assert json.loads(out)["folders"] == []
+
+    _, out = run([str(folder), "--json", "--all"], capsys)
+    included = json.loads(out)["folders"]
+    assert len(included) == 1
+    assert included[0]["findings"] == []
+
+
+def test_json_lines_hides_empty_findings_unless_all(tmp_path, capsys):
+    folder = tmp_path / "album"
+    for i in range(12):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    _, out = run([str(folder), "--jsonl", "--min-verdict", "tidy"], capsys)
+    assert out == ""
+
+    _, out = run([str(folder), "--jsonl", "--all"], capsys)
+    assert json.loads(out)["findings"] == []
+
+
 def test_all_handles_multiple_tidy_folders(tmp_path, capsys):
     for parent in (tmp_path, tmp_path / "child"):
         for i in range(6):
