@@ -9,13 +9,16 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from conftest import codes, finding, write_blob, write_text
 
 from messie.analyze import analyze_dir
 from messie.result import Verdict
 from messie.scan import read_dir
+from messie.signals.temporal import time_strata
 
 DAY = 86400.0
 
@@ -232,6 +235,73 @@ def test_loose_files_resembling_a_subfolder(tmp_path, fake_embedder):
     analysis = analyze_dir(folder, embedder=fake_embedder)
     assert "misfiled_neighbours" in codes(analysis)
     assert "Alphas" in finding(analysis, "misfiled_neighbours").data["by_subdir"]
+
+
+def test_dominant_parent_files_are_not_misfiled(tmp_path, fake_embedder):
+    """A descendant of the dominant subject must not make its parent files loose."""
+    folder = tmp_path / "Documents"
+    topic_files(folder, "alpha", 8)
+    topic_files(folder / "Alphas", "alpha", 6)
+
+    analysis = analyze_dir(folder, embedder=fake_embedder)
+
+    assert "misfiled_neighbours" not in codes(analysis)
+
+
+def test_weakly_attached_files_still_match_a_descendant(tmp_path, fake_embedder):
+    """A small same-subject group beside a dominant group remains detectable."""
+    folder = tmp_path / "Documents"
+    topic_files(folder, "beta", 6)
+    topic_files(folder, "alpha", 3)
+    topic_files(folder / "Alphas", "alpha", 5)
+
+    analysis = analyze_dir(folder, embedder=fake_embedder)
+
+    assert "misfiled_neighbours" in codes(analysis)
+
+
+def _strata_context(vectors: np.ndarray, labels: list[int]):
+    """Build the smallest context needed to exercise ``time_strata``."""
+    now = time.time()
+    files = [
+        SimpleNamespace(mtime=now - (730 if i < 3 else 1) * DAY)
+        for i in range(6)
+    ]
+    groups = tuple(np.flatnonzero(np.asarray(labels) == cid) for cid in sorted(set(labels)))
+    clustering = SimpleNamespace(labels=np.asarray(labels), groups=groups)
+    return SimpleNamespace(
+        clustering=clustering,
+        n_files=6,
+        settings=SimpleNamespace(min_files_to_judge=6, time_strata_gap_days=365.0),
+        files=files,
+        vectors=vectors,
+        topical=np.ones(6, dtype=bool),
+        thresholds=SimpleNamespace(unrelated=0.55),
+        mtime_span=lambda indices: (
+            min(files[i].mtime for i in indices), max(files[i].mtime for i in indices)
+        ),
+        label_of=lambda cid: f"subject {cid}",
+    )
+
+
+def test_related_fragmented_eras_stay_quiet():
+    """Different cluster ids alone do not make one subject separate eras."""
+    vectors = np.tile(np.array([1.0, 0.0], dtype=np.float32), (6, 1))
+    analysis = _strata_context(vectors, [0, 0, 0, 1, 1, 1])
+
+    assert time_strata(analysis) == []
+
+
+def test_unrelated_eras_are_reported():
+    vectors = np.vstack(
+        [
+            np.tile(np.array([1.0, 0.0], dtype=np.float32), (3, 1)),
+            np.tile(np.array([0.0, 1.0], dtype=np.float32), (3, 1)),
+        ]
+    )
+    analysis = _strata_context(vectors, [0, 0, 0, 1, 1, 1])
+
+    assert time_strata(analysis)[0].code == "time_strata"
 
 
 def test_no_neighbour_finding_when_nothing_matches(tmp_path, fake_embedder):

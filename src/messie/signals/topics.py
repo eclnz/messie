@@ -9,6 +9,7 @@ import numpy as np
 
 from messie.result import Finding
 from messie.signals import ramp, signal
+from messie.tokens import name_tokens
 
 if TYPE_CHECKING:  # pragma: no cover
     from messie.analyze import SignalContext
@@ -16,6 +17,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Diminishing contribution from each additional subject.
 _TOPIC_DECAY = 0.45
+_MIN_UNRELATED_SEPARATION = 0.10
+_SHARED_NAME_THREAD = 0.35
 
 
 def _plural(n: int, word: str) -> str:
@@ -32,7 +35,15 @@ def _dominant_subject(analysis: SignalContext) -> np.ndarray | None:
     members = clustering.groups[biggest]
     if members.size == 0:
         return None
-    return analysis.vectors[members].mean(axis=0)
+    return _unit(analysis.vectors[members].mean(axis=0))
+
+
+def _unit(vector: np.ndarray) -> np.ndarray:
+    """Return a unit-length copy of a profile, or a zero vector."""
+    norm = float(np.linalg.norm(vector))
+    if norm <= 1e-8:
+        return np.zeros_like(vector)
+    return vector / norm
 
 
 def _relative(folder: Path, analysis: SignalContext) -> str:
@@ -51,8 +62,28 @@ def _unrelated_set(analysis: SignalContext, candidates: list[int]) -> list[int]:
     ceiling = analysis.thresholds.unrelated
 
     chosen: list[int] = []
+
+    def has_shared_name_thread(first: int, second: int) -> bool:
+        left = {
+            token
+            for index in clustering.groups[first]
+            for token in name_tokens(analysis.files[int(index)].stem)
+        }
+        right = {
+            token
+            for index in clustering.groups[second]
+            for token in name_tokens(analysis.files[int(index)].stem)
+        }
+        if not left or not right:
+            return False
+        return len(left & right) / len(left | right) >= _SHARED_NAME_THREAD
+
     for cid in sorted(candidates, key=lambda cid: -len(clustering.groups[cid])):
-        if all(sim[cid, other] < ceiling for other in chosen):
+        if all(
+            sim[cid, other] < ceiling
+            and not has_shared_name_thread(cid, other)
+            for other in chosen
+        ):
             chosen.append(cid)
     return chosen
 
@@ -79,6 +110,8 @@ def unrelated_topics(analysis: SignalContext) -> list[Finding]:
     separation = 1.0 - max(0.0, float(np.mean(pairs))) / max(
         1e-6, analysis.thresholds.unrelated
     )
+    if separation < _MIN_UNRELATED_SEPARATION:
+        return []
     sharpness = 0.8 + 0.2 * max(0.0, min(1.0, separation))
 
     crowding = 1.0 - _TOPIC_DECAY ** (len(chosen) - 1)
@@ -205,12 +238,11 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
     if vectors.size == 0:
         return []
 
-    own_mean = vectors.mean(axis=0)
     margin = analysis.thresholds.misfiled_margin
     threshold = analysis.thresholds.cluster
 
     subdirs = list(analysis.child_profiles)
-    profiles = np.stack([analysis.child_profiles[d] for d in subdirs])
+    profiles = np.stack([_unit(analysis.child_profiles[d]) for d in subdirs])
     if profiles.shape[1] != vectors.shape[1]:
         return []
 
@@ -222,16 +254,36 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
         subdirs = [d for d, keep in zip(subdirs, distinct, strict=True) if keep]
         profiles = profiles[distinct]
 
+    # Compare a candidate with the parent after removing that candidate.  A
+    # global mean includes the candidate itself and lets a large dominant
+    # group make every topical file look attached.  Restricting the profile to
+    # topical vectors also keeps binary/junk entries from diluting the result.
+    topical = np.flatnonzero(analysis.topical)
+    if topical.size < 2:
+        return []
+    parent_sum = vectors[topical].sum(axis=0)
     scores = vectors @ profiles.T          # (n_files, n_subdirs)
-    own = vectors @ own_mean               # (n_files,)
 
     hits: dict[str, list[str]] = {}
     total = 0
     for i in range(vectors.shape[0]):
-        if not analysis.topical[i]:
+        if not analysis.topical[i] or not vectors[i].any():
             continue
+        # Leave-one-out normalized parent comparison.  This is the attachment
+        # score used to decide whether the candidate is genuinely loose.
+        remaining = parent_sum - vectors[i]
+        own = float(vectors[i] @ _unit(remaining))
         best = int(np.argmax(scores[i]))
-        if scores[i, best] >= threshold and scores[i, best] > own[i] + margin:
+        child = float(scores[i, best])
+        if own >= threshold:
+            continue
+        # A descendant profile is a summary of its files, so a coherent
+        # subject can score below the cluster threshold when its vocabulary
+        # is broad.  Once the parent attachment is demonstrably weak, permit
+        # the margin-sized lower band; the two-file-per-descendant guard below
+        # keeps this from turning an isolated weak match into a finding.
+        child_floor = threshold - margin
+        if child >= child_floor:
             hits.setdefault(_relative(subdirs[best], analysis), []).append(
                 analysis.files[i].name
             )
