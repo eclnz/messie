@@ -28,7 +28,10 @@ _ZIP_MEMBERS: dict[str, tuple[str, ...]] = {
     "odt": ("content.xml",),
     "pptx": ("ppt/slides/slide", "ppt/notesSlides/notesSlide"),
     "odp": ("content.xml",),
-    "xlsx": ("xl/sharedStrings.xml", "xl/worksheets/sheet1.xml"),
+    # Worksheet parts are numbered by Excel (sheet1.xml, sheet2.xml, ...).
+    # Keep the directory prefix here; _zip_member_matches restricts it to
+    # direct worksheet XML parts and therefore excludes worksheet rels.
+    "xlsx": ("xl/sharedStrings.xml", "xl/worksheets/"),
     "ods": ("content.xml",),
     "epub": (".xhtml", ".html", ".htm"),
 }
@@ -46,6 +49,16 @@ def _strip_markup(xml: str) -> str:
     return unescape(_TAG_RE.sub("", _BREAK_RE.sub("\n", spaced)))
 
 
+def _zip_member_matches(name: str, ext: str, wanted: tuple[str, ...]) -> bool:
+    """Return whether *name* is a prose-bearing member of an archive."""
+    if ext == "xlsx" and name.startswith("xl/worksheets/"):
+        # Do not accidentally read worksheet relationship files or nested
+        # metadata as prose.  Excel worksheet parts are direct XML children.
+        remainder = name.removeprefix("xl/worksheets/")
+        return "/" not in remainder and remainder.endswith(".xml")
+    return any(name.startswith(prefix) or name.endswith(prefix) for prefix in wanted)
+
+
 def _from_zip_xml(path: Path, ext: str, limit: int, max_bytes: int) -> str:
     wanted = _ZIP_MEMBERS.get(ext, ())
     chunks: list[str] = []
@@ -53,7 +66,7 @@ def _from_zip_xml(path: Path, ext: str, limit: int, max_bytes: int) -> str:
     try:
         with zipfile.ZipFile(path) as zf:
             names = zf.namelist()
-            members = [n for n in names if any(n.startswith(w) or n.endswith(w) for w in wanted)]
+            members = [n for n in names if _zip_member_matches(n, ext, wanted)]
             for member in sorted(members):
                 if remaining == 0:
                     break
@@ -77,13 +90,60 @@ def _from_zip_xml(path: Path, ext: str, limit: int, max_bytes: int) -> str:
     return _clean(" ".join(chunks), limit)
 
 
-def _decode(raw: bytes) -> str:
+def _looks_like_utf16(raw: bytes) -> str | None:
+    """Infer BOM-free UTF-16 from its characteristic zero-byte pattern.
+
+    A BOM is preferred and handled by the caller.  Without one, ordinary
+    prose encoded as UTF-16 has a zero byte in one position of most two-byte
+    code units.  Requiring several matching units avoids classifying normal
+    binary data with one or two NULs as text.
+    """
+    sample = raw[:1024]
+    pair_count = len(sample) // 2
+    if pair_count < 4:
+        return None
+    sample = sample[: pair_count * 2]
+    le_zeros = sum(sample[index + 1] == 0 for index in range(0, len(sample), 2))
+    be_zeros = sum(sample[index] == 0 for index in range(0, len(sample), 2))
+    threshold = max(4, int(pair_count * 0.60))
+    if le_zeros >= threshold and le_zeros > be_zeros:
+        return "utf-16-le"
+    if be_zeros >= threshold and be_zeros > le_zeros:
+        return "utf-16-be"
+    return None
+
+
+def _decode_with_encoding(raw: bytes) -> tuple[str, bool]:
+    """Decode bytes and report whether UTF-16 handling was selected."""
+    if raw.startswith(b"\xff\xfe"):
+        try:
+            return raw.decode("utf-16-le").lstrip("\ufeff"), True
+        except UnicodeDecodeError:
+            pass
+    elif raw.startswith(b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16-be").lstrip("\ufeff"), True
+        except UnicodeDecodeError:
+            pass
+    else:
+        encoding = _looks_like_utf16(raw)
+        if encoding is not None:
+            try:
+                return raw.decode(encoding), True
+            except UnicodeDecodeError:
+                pass
+
     for encoding in ("utf-8", "utf-16", "cp1252", "latin-1"):
         try:
-            return raw.decode(encoding)
+            return raw.decode(encoding), False
         except (UnicodeDecodeError, LookupError):
             continue
-    return raw.decode("utf-8", errors="replace")
+    return raw.decode("utf-8", errors="replace"), False
+
+
+def _decode(raw: bytes) -> str:
+    """Decode bytes using the best available text encoding."""
+    return _decode_with_encoding(raw)[0]
 
 
 def _from_plain(path: Path, limit: int, max_bytes: int) -> str:
@@ -92,9 +152,15 @@ def _from_plain(path: Path, limit: int, max_bytes: int) -> str:
             raw = fh.read(min(max_bytes, limit * 4))
     except OSError:
         return ""
-    if b"\x00" in raw[:1024]:
+    text, was_utf16 = _decode_with_encoding(raw)
+    # UTF-16 naturally contains NUL bytes in its encoded representation, so
+    # detect it first.  A decoded NUL still indicates binary or malformed
+    # content and is rejected just as it was for other text formats.
+    if (not was_utf16 and b"\x00" in raw[:1024]) or (
+        was_utf16 and "\x00" in text[:1024]
+    ):
         return ""  # binary masquerading as text
-    return _clean(_decode(raw), limit)
+    return _clean(text, limit)
 
 
 # RTF groups that contain document machinery rather than prose.
@@ -183,7 +249,7 @@ class _BudgetReader:
 
 def _from_pdf(path: Path, limit: int, max_bytes: int) -> str:
     try:
-        from pypdf import PdfReader # type: ignore
+        from pypdf import PdfReader  # type: ignore
     except Exception:  # noqa: BLE001
         return ""
     try:
