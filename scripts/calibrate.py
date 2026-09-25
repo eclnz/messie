@@ -149,7 +149,7 @@ def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep
     unrelated ones merge; too high and unrelated ones separate but real
     subjects shatter. The sum of the two rates is maximised at the crossover.
     """
-    chosen = list(ALL_TOPICS)[:topics] if topics else list(ALL_TOPICS)
+    chosen = sorted(ALL_TOPICS)[:topics] if topics else sorted(ALL_TOPICS)
     if len(chosen) < 4:
         raise ValueError("threshold calibration needs at least four topics")
     rng = random.Random(seed)
@@ -213,7 +213,8 @@ def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep
     thresholds = [float(t) for t in np.arange(0.10, 0.50, 0.01)]
     points = [measure(t, training) for t in thresholds]
     validation_points = [measure(t, validation) for t in thresholds]
-    best = max(points, key=lambda p: p.total)
+    shipped_threshold = float(embedder.scale) * DEFAULT_SETTINGS.cluster_rel
+    best = max(points, key=lambda p: (p.total, -abs(p.threshold - shipped_threshold)))
     heldout = min(validation_points, key=lambda p: abs(p.threshold - best.threshold))
 
     return Sweep(
@@ -309,7 +310,7 @@ def sweep_unrelated(*, pairs: int = 60, seed: int = 4, limit: int = 400) -> Rati
     50% or 100% — precise-looking numbers with no information in them.
     """
     embedder = get_embedder()
-    topics = list(ALL_TOPICS)
+    topics = sorted(ALL_TOPICS)
     tmp = Path(tempfile.mkdtemp(prefix="messie-unrelated-"))
     should_fire = []
     rng = random.Random(seed)
@@ -401,7 +402,7 @@ def sweep_misfiled(*, depth: int = 3, limit: int = 400) -> RatioSweep:
                 profiles[key] = profile(sub.files, embedder=embedder)
         return contents, profiles, vectorize(contents.files, embedder=embedder)
 
-    topics = list(ALL_TOPICS)
+    topics = sorted(ALL_TOPICS)
     positives = []
     for i in range(0, len(topics) - 1, 2):
         root = build_nested_misfile(
