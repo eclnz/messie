@@ -23,12 +23,13 @@ from corpus import ALL_TOPICS, TOPICS  # noqa: E402
 from corpus.build import build_coherent, build_mixed  # noqa: E402
 from realdirs import coherent_folders  # noqa: E402
 
+from messie.analyze import analyze, profile, vectorize  # noqa: E402
 from messie.cluster import cluster_vectors  # noqa: E402
 from messie.config import DEFAULT_SETTINGS  # noqa: E402
 from messie.embed import get_embedder  # noqa: E402
-from messie.analyze import analyze, profile, vectorize  # noqa: E402
-from messie.scan import read_dir, walk  # noqa: E402
 from messie.result import Verdict  # noqa: E402
+from messie.scan import read_dir, walk  # noqa: E402
+
 
 @dataclass
 class Separation:
@@ -67,7 +68,11 @@ class Sweep:
     embedder: str
     shipped_scale: float
     best: SweepPoint
+    validation: SweepPoint
+    training_topics: int
+    validation_topics: int
     points: list[SweepPoint]
+    validation_points: list[SweepPoint]
 
 
 @dataclass
@@ -145,50 +150,81 @@ def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep
     subjects shatter. The sum of the two rates is maximised at the crossover.
     """
     chosen = list(ALL_TOPICS)[:topics] if topics else list(ALL_TOPICS)
+    if len(chosen) < 4:
+        raise ValueError("threshold calibration needs at least four topics")
+    rng = random.Random(seed)
+    rng.shuffle(chosen)
+    split = max(2, min(len(chosen) - 2, round(len(chosen) * 0.75)))
+    training_topics = chosen[:split]
+    validation_topics = chosen[split:]
     embedder = get_embedder()
     tmp = Path(tempfile.mkdtemp(prefix="messie-calibrate-"))
 
-    single = {}
-    for topic in chosen:
-        folder = build_coherent(tmp / "one" / topic, topic, 6)
-        single[topic] = vectorize(read_dir(folder).files, embedder=embedder).vectors
+    def fixtures(label: str, topic_names: list[str]):
+        single = {}
+        for topic in topic_names:
+            folder = build_coherent(tmp / label / "one" / topic, topic, 6)
+            single[topic] = vectorize(read_dir(folder).files, embedder=embedder).vectors
 
-    rng = random.Random(seed)
-    combos = list(itertools.combinations(chosen, 2))
-    rng.shuffle(combos)
-    both = {}
-    for a, b in combos[:pairs]:
-        folder = build_mixed(tmp / "two" / f"{a}__{b}", {a: 5, b: 5})
-        files = read_dir(folder).files
-        stems_a = {stem for stem, _ in TOPICS[a]}
-        origin = np.array([0 if f.stem in stems_a else 1 for f in files])
-        both[(a, b)] = (vectorize(files, embedder=embedder).vectors, origin)
+        combos = list(itertools.combinations(topic_names, 2))
+        rng.shuffle(combos)
+        both = {}
+        for a, b in combos[:pairs]:
+            folder = build_mixed(tmp / label / "two" / f"{a}__{b}", {a: 5, b: 5})
+            files = read_dir(folder).files
+            stems_a = {stem for stem, _ in TOPICS[a]}
+            origin = np.array([0 if f.stem in stems_a else 1 for f in files])
+            both[(a, b)] = (vectorize(files, embedder=embedder).vectors, origin)
+        return single, both
 
-    points = []
-    for threshold in np.arange(0.10, 0.50, 0.01):
-        held = sum(1 for v in single.values() if len(cluster_vectors(v, threshold).groups) == 1)
+    training = fixtures("training", training_topics)
+    validation = fixtures("validation", validation_topics)
+
+    def measure(threshold: float, cases) -> SweepPoint:
+        single, both = cases
+        def meaningful_groups(vectors: np.ndarray):
+            clustering = cluster_vectors(vectors, threshold)
+            floor = max(
+                DEFAULT_SETTINGS.meaningful_cluster_min,
+                int(DEFAULT_SETTINGS.meaningful_cluster_frac * len(vectors)),
+            )
+            return [group for group in clustering.groups if len(group) >= floor]
+
+        # A singleton or tiny facet is not a second subject.  Calibrate the
+        # structure consumed by the signals, rather than requiring every leaf
+        # to belong to one mathematically perfect cluster.
+        held = sum(1 for v in single.values() if len(meaningful_groups(v)) <= 1)
         apart = 0
         for vectors, origin in both.values():
-            clustering = cluster_vectors(vectors, threshold)
+            groups = meaningful_groups(vectors)
             merged = any(
-                len(set(origin[members])) > 1
-                for members in clustering.groups
+                np.count_nonzero(origin[members] == 0) >= 2
+                and np.count_nonzero(origin[members] == 1) >= 2
+                for members in groups
             )
             apart += not merged
-        points.append(
-            SweepPoint(
-                threshold=round(float(threshold), 3),
-                scale=round(float(threshold) / DEFAULT_SETTINGS.cluster_rel, 3),
-                subjects_held=round(held / max(1, len(single)), 3),
-                pairs_separated=round(apart / max(1, len(both)), 3),
-            )
+        return SweepPoint(
+            threshold=round(float(threshold), 3),
+            scale=round(float(threshold) / DEFAULT_SETTINGS.cluster_rel, 3),
+            subjects_held=round(held / max(1, len(single)), 3),
+            pairs_separated=round(apart / max(1, len(both)), 3),
         )
+
+    thresholds = [float(t) for t in np.arange(0.10, 0.50, 0.01)]
+    points = [measure(t, training) for t in thresholds]
+    validation_points = [measure(t, validation) for t in thresholds]
+    best = max(points, key=lambda p: p.total)
+    heldout = min(validation_points, key=lambda p: abs(p.threshold - best.threshold))
 
     return Sweep(
         embedder=embedder.name,
         shipped_scale=float(embedder.scale),
-        best=max(points, key=lambda p: p.total),
+        best=best,
+        validation=heldout,
+        training_topics=len(training_topics),
+        validation_topics=len(validation_topics),
         points=points,
+        validation_points=validation_points,
     )
 
 
@@ -495,6 +531,11 @@ def _print_sweep(report: Sweep) -> None:
     print(
         f"  best threshold {best.threshold:.2f} -> scale {best.scale:.2f} "
         f"(subjects {best.subjects_held:.0%}, pairs {best.pairs_separated:.0%})"
+    )
+    heldout = report.validation
+    print(
+        f"  held-out topics {report.validation_topics}  "
+        f"subjects {heldout.subjects_held:.0%}, pairs {heldout.pairs_separated:.0%}"
     )
     print(f"  shipped scale  {report.shipped_scale:.2f}", end="")
     drift = abs(report.shipped_scale - best.scale)

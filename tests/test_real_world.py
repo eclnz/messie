@@ -29,7 +29,6 @@ from messie.result import Verdict
 #: flagging packages for resembling their own subpackages.
 FALSE_POSITIVE_BUDGET = 0.10
 
-pytest.skip("Skipping this test file", allow_module_level=True)
 @pytest.fixture(scope="module")
 def judged() -> list:
     folders = coherent_folders()

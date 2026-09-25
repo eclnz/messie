@@ -36,8 +36,6 @@ from messie.config import DEFAULT_SETTINGS, Thresholds  # noqa: E402
 #: mistake does.
 SCALE_TOLERANCE = 0.06
 
-pytest.skip("Skipping this test file", allow_module_level=True)
-
 @pytest.fixture(scope="module")
 def separation():
     embedder_or_skip()
@@ -119,6 +117,13 @@ def test_the_sweep_has_a_real_peak(sweep):
     best = sweep.best.total
     worst = min(p.total for p in sweep.points)
     assert best - worst > 0.25
+
+
+def test_chosen_threshold_generalises_to_unseen_topics(sweep):
+    """Selection and evaluation must not reuse the same authored subjects."""
+    assert sweep.training_topics > sweep.validation_topics >= 2
+    assert sweep.validation.subjects_held >= 0.60
+    assert sweep.validation.pairs_separated >= 0.70
 
 
 def test_default_embedder_declares_a_scale():
