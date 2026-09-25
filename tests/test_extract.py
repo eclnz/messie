@@ -165,16 +165,15 @@ def test_zip_document_respects_read_budget(tmp_path: Path):
     assert "beyond budget" not in extract_text(_entry(path), settings)
 
 
-def test_pdf_parser_receives_a_bounded_reader(tmp_path: Path, monkeypatch):
+def test_pdf_larger_than_the_read_budget_is_not_parsed(tmp_path: Path, monkeypatch):
     path = tmp_path / "large.pdf"
     path.write_bytes(b"%PDF" + b"x" * 100)
-    reads: list[int] = []
+    opened = False
 
     class Reader:
-        def __init__(self, stream):
-            reads.append(len(stream.read(100)))
-            reads.append(len(stream.read(100)))
-            self.pages = []
+        def __init__(self, _stream):
+            nonlocal opened
+            opened = True
 
     module = types.ModuleType("pypdf")
     module.PdfReader = Reader
@@ -182,4 +181,29 @@ def test_pdf_parser_receives_a_bounded_reader(tmp_path: Path, monkeypatch):
 
     settings = DEFAULT_SETTINGS.with_(max_read_bytes=10)
     assert extract_text(_entry(path), settings) == ""
-    assert sum(reads) == 10
+    assert not opened
+
+
+def test_pdf_extraction_stops_after_two_pages(tmp_path: Path, monkeypatch):
+    path = tmp_path / "many-pages.pdf"
+    path.write_bytes(b"%PDF placeholder")
+    visited: list[int] = []
+
+    class Page:
+        def __init__(self, number: int):
+            self.number = number
+
+        def extract_text(self):
+            visited.append(self.number)
+            return f"page {self.number}"
+
+    class Reader:
+        def __init__(self, _stream):
+            self.pages = [Page(number) for number in range(5)]
+
+    module = types.ModuleType("pypdf")
+    module.PdfReader = Reader
+    monkeypatch.setitem(sys.modules, "pypdf", module)
+
+    assert extract_text(_entry(path)) == "page 0 page 1"
+    assert visited == [0, 1]

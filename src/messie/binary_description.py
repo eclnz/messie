@@ -150,6 +150,12 @@ def _gif_size(data: bytes) -> str:
     return _dims(*struct.unpack("<HH", data[6:10]))
 
 
+def _bmp_size(data: bytes) -> str:
+    if data[:2] != b"BM" or len(data) < 26:
+        return ""
+    return _dims(*struct.unpack("<ii", data[18:26]))
+
+
 def _jpeg_size(data: bytes) -> str:
     if data[:2] != b"\xff\xd8":
         return ""
@@ -173,7 +179,7 @@ def _jpeg_size(data: bytes) -> str:
 
 
 def _image_size(data: bytes) -> str:
-    return _png_size(data) or _jpeg_size(data) or _gif_size(data)
+    return _png_size(data) or _jpeg_size(data) or _gif_size(data) or _bmp_size(data)
 
 
 def _image_category(tags: Mapping[str, object]) -> list[str]:
@@ -202,6 +208,11 @@ def _describe_image(path: Path, max_bytes: int = DEFAULT_SETTINGS.max_read_bytes
         return ""
     size = _image_size(head)
     if not _within_budget(path, max_bytes):
+        return size
+    suffix = path.suffix.lower()
+    if suffix in {".gif", ".bmp"}:
+        return size
+    if suffix == ".png" and b"eXIf" not in head and b"Software" not in head:
         return size
 
     try:

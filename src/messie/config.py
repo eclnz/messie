@@ -30,9 +30,10 @@ class Settings:
 
     min_files_to_judge: int = 6
 
-    text_excerpt_chars: int = 2500
+    text_excerpt_chars: int = 1000
     max_read_bytes: int = 1 << 20
     min_text_chars: int = 120
+    image_description_sample: int = 24
 
     text_weight_rich: float = 0.75
     text_weight_thin: float = 0.45

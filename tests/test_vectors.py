@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from messie.analyze import PreparedRecord, _compose_record, _mix_for
+from messie.analyze import PreparedRecord, _compose_record, _mix_for, _prepare
 from messie.config import DEFAULT_SETTINGS
 from messie.kinds import Domain, Kind
 from messie.scan import FileEntry
@@ -54,3 +54,21 @@ def test_evidence_channels_do_not_cross_match():
     record = _compose_record(prepared, text, names, kinds, DEFAULT_SETTINGS)
     similarity = float(record.vectors[0] @ record.vectors[1])
     assert similarity == pytest.approx(0.05, abs=1e-6)
+
+
+def test_large_image_folders_sample_expensive_descriptions(monkeypatch):
+    files = [
+        FileEntry(Path(f"image-{index:03}.png"), 100, 0.0, Kind.IMAGE, Domain.MEDIA)
+        for index in range(50)
+    ]
+    described: list[str] = []
+    monkeypatch.setattr("messie.analyze.extract_text", lambda *_: "")
+    monkeypatch.setattr(
+        "messie.analyze.describe_binary",
+        lambda file, _settings: described.append(file.name) or "800x600",
+    )
+
+    record = _prepare(files, settings=DEFAULT_SETTINGS.with_(image_description_sample=5))
+
+    assert len(described) == 5
+    assert sum(bool(text) for text in record.texts) == 5

@@ -16,7 +16,7 @@ from messie.config import Settings
 from messie.scan import FileEntry
 
 _SCHEMA_VERSION = 1
-_EXTRACTION_VERSION = 2
+_EXTRACTION_VERSION = 3
 _MAX_ROWS = 100_000
 _MAX_EMBEDDINGS = 250_000
 
@@ -35,7 +35,10 @@ def _cache_dir() -> Path:
 
 
 def _settings_key(settings: Settings) -> str:
-    return f"{_EXTRACTION_VERSION}:{settings.text_excerpt_chars}:{settings.max_read_bytes}"
+    return (
+        f"{_EXTRACTION_VERSION}:{settings.text_excerpt_chars}:"
+        f"{settings.max_read_bytes}:{settings.image_description_sample}"
+    )
 
 
 class EvidenceCache:

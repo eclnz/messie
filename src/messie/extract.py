@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from html import unescape
@@ -21,6 +22,7 @@ _INLINE_BREAK_RE = re.compile(r"</(w:tab|br|td|si)\b[^>]*>", re.IGNORECASE)
 _RTF_CTRL_RE = re.compile(r"\\[a-z]+-?\d*\s?|[{}]", re.IGNORECASE)
 _MIN_XML_READ = 16 << 10
 _XML_READ_FACTOR = 12
+_MAX_PDF_PAGES = 2
 
 #: Which member files inside each zip-based format actually hold prose.
 _ZIP_MEMBERS: dict[str, tuple[str, ...]] = {
@@ -252,11 +254,19 @@ def _from_pdf(path: Path, limit: int, max_bytes: int) -> str:
         from pypdf import PdfReader  # type: ignore
     except Exception:  # noqa: BLE001
         return ""
+    # Best-effort extraction should not leak dependency diagnostics for a
+    # damaged third-party PDF into an otherwise Unix-friendly command.
+    logging.getLogger("pypdf").setLevel(logging.ERROR)
     try:
+        # PDF cross-reference tables can point anywhere in the file.  Feeding
+        # a parser a partial large document is both slow and usually fruitless;
+        # fall back to filename evidence when the file exceeds the read budget.
+        if path.stat().st_size > max_bytes:
+            return ""
         with path.open("rb", buffering=0) as source:
             reader = PdfReader(_BudgetReader(source, max_bytes))
             chunks = []
-            for page in reader.pages[:5]:
+            for page in reader.pages[:_MAX_PDF_PAGES]:
                 chunks.append(page.extract_text() or "")
                 if sum(len(c) for c in chunks) >= limit:
                     break

@@ -208,12 +208,26 @@ def _prepare(
     settings: Settings = DEFAULT_SETTINGS,
     cache: EvidenceCache | None = None,
 ) -> PreparedRecord:
+    image_indices = [index for index, file in enumerate(files) if file.kind is Kind.IMAGE]
+    described_images = set(image_indices)
+    limit = max(0, settings.image_description_sample)
+    if len(image_indices) > limit:
+        ordered = sorted(image_indices, key=lambda index: files[index].name)
+        if limit:
+            step = len(ordered) / limit
+            described_images = {ordered[int(index * step)] for index in range(limit)}
+        else:
+            described_images = set()
+
     texts: list[str] = []
-    for file in files:
+    for index, file in enumerate(files):
         text = cache.get(file) if cache is not None else None
         if text is None:
-            text = extract_text(file, settings) or describe_binary(file, settings)
-            if cache is not None:
+            text = extract_text(file, settings)
+            may_describe = file.kind is not Kind.IMAGE or index in described_images
+            if not text and may_describe:
+                text = describe_binary(file, settings)
+            if cache is not None and may_describe:
                 cache.put(file, text)
         texts.append(text)
     names = _name_phrases(files)
