@@ -254,10 +254,10 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
         subdirs = [d for d, keep in zip(subdirs, distinct, strict=True) if keep]
         profiles = profiles[distinct]
 
-    # Compare a candidate with the parent after removing that candidate.  A
-    # global mean includes the candidate itself and lets a large dominant
-    # group make every topical file look attached.  Restricting the profile to
-    # topical vectors also keeps binary/junk entries from diluting the result.
+    # Compare candidates with the dominant parent subject when one exists.
+    # Other misplaced neighbours can form a small cluster of their own, so a
+    # global leave-one-out mean would make each of them legitimize the others.
+    # Fall back to leave-one-out when the parent has no meaningful subject.
     topical = np.flatnonzero(analysis.topical)
     if topical.size < 2:
         return []
@@ -269,10 +269,8 @@ def misfiled_neighbours(analysis: SignalContext) -> list[Finding]:
     for i in range(vectors.shape[0]):
         if not analysis.topical[i] or not vectors[i].any():
             continue
-        # Leave-one-out normalized parent comparison.  This is the attachment
-        # score used to decide whether the candidate is genuinely loose.
-        remaining = parent_sum - vectors[i]
-        own = float(vectors[i] @ _unit(remaining))
+        parent = main if main is not None else _unit(parent_sum - vectors[i])
+        own = float(vectors[i] @ parent)
         best = int(np.argmax(scores[i]))
         child = float(scores[i, best])
         if own >= threshold:
