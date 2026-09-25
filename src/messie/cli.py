@@ -39,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
             "Notices when a folder has become a mess. Reports only — never moves, "
             "renames or deletes anything. Runs entirely on this machine."
         ),
+        epilog=(
+            "plain output: SCORE<TAB>VERDICT<TAB>FILES<TAB>PATH<TAB>FINDINGS; "
+            "use --json or --jsonl for structured output"
+        ),
     )
     parser.add_argument(
         "paths",
@@ -61,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-a", "--all", dest="show_all", action="store_true",
-        help="show tidy folders as well as findings",
+        help="write one record for every judged folder",
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(
@@ -95,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--color", choices=("auto", "always", "never"), nargs="?", const="always",
-        default="auto", help="when to use colour (default: %(default)s)",
+        default="never", help="when to colour the verdict (default: %(default)s)",
     )
     parser.add_argument(
         "--no-color", dest="color", action="store_const", const="never",
@@ -176,10 +180,8 @@ def _write_stdout(output: str) -> None:
             sys.stdout.write("\n")
         sys.stdout.flush()
     except BrokenPipeError:
-        try:
-            sys.stdout = open(os.devnull, "w")
-        except OSError:
-            pass
+        # Prevent Python's final stdout flush from reporting another EPIPE.
+        sys.stdout = None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -266,8 +268,10 @@ def main(argv: list[str] | None = None) -> int:
                 if (rendered := render_json_lines(items, opts))
             )
         else:
-            output = "\n\n".join(
-                render_text(items, opts) for _, items, opts in completed
+            output = "\n".join(
+                rendered
+                for _, items, opts in completed
+                if (rendered := render_text(items, opts))
             )
         _write_stdout(output)
 

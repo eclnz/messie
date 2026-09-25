@@ -25,7 +25,9 @@ def run(argv, capsys):
 def test_reports_a_mess_and_exits_one(messy_tree, capsys):
     code, out = run([str(messy_tree), "--no-color"], capsys)
     assert code == 1
-    assert "unrelated" in out.lower()
+    fields = out.rstrip("\n").split("\t")
+    assert fields[1] in {"lived-in", "messy", "chaotic"}
+    assert "unrelated_topics" in fields[4]
 
 
 def test_tidy_folder_exits_zero(tmp_path, capsys):
@@ -34,7 +36,7 @@ def test_tidy_folder_exits_zero(tmp_path, capsys):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     code, out = run([str(folder), "--no-color"], capsys)
     assert code == 0
-    assert "No mess found" in out
+    assert out == ""
 
 
 def test_json_output_is_valid_and_complete(messy_tree, capsys):
@@ -81,7 +83,7 @@ def test_all_flag_shows_tidy_folders(tmp_path, capsys):
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     _, out = run([str(folder), "--all", "--no-color"], capsys)
-    assert "TIDY" in out
+    assert "\ttidy\t" in out
 
 
 def test_short_depth_and_all_flags(tmp_path, capsys):
@@ -89,7 +91,7 @@ def test_short_depth_and_all_flags(tmp_path, capsys):
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     _, out = run(["-a", "-d", "0", str(folder), "--no-color"], capsys)
-    assert "TIDY" in out
+    assert "\ttidy\t" in out
 
 
 def test_quoted_glob_expands_to_multiple_roots(tmp_path, capsys):
@@ -163,8 +165,44 @@ def test_all_handles_multiple_tidy_folders(tmp_path, capsys):
     code, out = run([str(tmp_path), "-a", "--no-color"], capsys)
 
     assert code == 0
-    assert out.count("TIDY") == 2
-    assert "0 of 2 folders are a mess" in out
+    lines = out.splitlines()
+    assert len(lines) == 2
+    assert all(line.split("\t")[1] == "tidy" for line in lines)
+
+
+def test_text_output_is_unix_friendly_tsv(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    folder = tmp_path / "album with spaces"
+    for i in range(12):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    _, out = run([str(folder), "-a"], capsys)
+
+    assert "\033[" not in out
+    assert "nothing out of place" not in out
+    assert "folders are a mess" not in out
+    score, verdict, files, path, findings = out.rstrip("\n").split("\t")
+    assert float(score) == 0
+    assert verdict == "tidy"
+    assert files == "12"
+    assert path == "./album with spaces"
+    assert findings == "-"
+
+
+def test_default_colour_mode_preserves_plain_records():
+    from messie.cli import build_parser
+
+    assert build_parser().parse_args([]).color == "never"
+
+
+def test_help_documents_plain_output_columns(capsys):
+    from messie.cli import build_parser
+
+    with pytest.raises(SystemExit) as stopped:
+        build_parser().parse_args(["--help"])
+
+    assert stopped.value.code == 0
+    assert "SCORE<TAB>VERDICT<TAB>FILES<TAB>PATH<TAB>FINDINGS" in capsys.readouterr().out
 
 
 def test_unavailable_embedder_is_an_error(tmp_path, capsys, monkeypatch):

@@ -56,131 +56,54 @@ def _fit(text: str, width: int) -> str:
 
 
 def _display_path(path: Path, root: Path) -> str:
-    if path == root:
-        return _tilde(path)
+    """Return a path that another command can use from the current directory."""
+    del root  # Paths are records now, so they must not depend on a scan root.
     try:
-        return "./" + str(path.relative_to(root))
-    except ValueError:
-        return _tilde(path)
-
-
-def _tilde(path: Path) -> str:
-    home = str(Path.home())
-    text = str(path)
-    return "~" + text[len(home) :] if text.startswith(home) else text
-
-
-def _year(ts: float) -> str:
-    return time.strftime("%Y", time.localtime(ts)) if ts else "?"
-
-
-def _span(first: float, last: float) -> str:
-    a, b = _year(first), _year(last)
-    return a if a == b else f"{a}–{b}"
+        relative = os.path.relpath(path, Path.cwd())
+    except (OSError, ValueError):
+        return str(path)
+    if relative == "." or relative.startswith("../"):
+        return relative
+    return "./" + relative
 
 
 def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
-    """One folder's verdict and the evidence for it."""
-    colour = opts.colour
-    lines: list[str] = []
-    title = _display_path(analysis.path, opts.root)
+    """Render one tab-separated folder record.
 
+    The columns are score, verdict, file count, path, and finding codes.  Keeping
+    the numeric score first makes the default stream directly useful with
+    ``sort -n`` while the path remains an executable operand for tools such as
+    ``xargs``.
+    """
     if not analysis.judged:
-        if opts.show_all:
-            reason = analysis.skip_reason.message if analysis.skip_reason else ""
-            lines.append(
-                f"{title:<44} {_paint(chr(8212), _DIM, colour)}  "
-                f"{_paint(reason, _DIM, colour)}"
-            )
-        return lines
+        return []
 
-    badge = _paint(
-        _VERDICT_LABELS[analysis.verdict].upper(),
+    verdict = _paint(
+        _VERDICT_LABELS[analysis.verdict],
         _COLOURS[analysis.verdict] + _BOLD,
-        colour,
+        opts.colour,
     )
-    score = f"{analysis.score:g}/100"
-    meta = _paint(f"{analysis.n_files} files · {analysis.embedder}", _DIM, colour)
-    lines.append(f"{_paint(_fit(title, 52), _BOLD, colour)} {badge}  {score}   {meta}")
-
-    if not analysis.findings:
-        lines.append(_paint("  nothing out of place.", _DIM, colour))
-        return lines
-
-    for finding in analysis.findings:
-        lines.append(f"  {finding.headline}")
-
-        if finding.code == "unrelated_topics":
-            for group in finding.data.get("groups", []):
-                label = group["label"]
-                count = f"{group['count']} files"
-                when = _span(group.get("first_seen", 0), group.get("last_seen", 0))
-                examples = ", ".join(group["examples"])
-                extra = group["count"] - len(group["examples"])
-                if extra > 0:
-                    examples += f" +{extra}"
-                lines.append(
-                    f"      · {_fit(label, 28)} {count:>9}  {when:<11} "
-                    f"{_paint(examples, _DIM, colour)}"
-                )
-            continue
-
-        detail_bits = []
-        if finding.detail:
-            detail_bits.append(finding.detail)
-        if finding.examples:
-            detail_bits.append(", ".join(finding.examples[:4]))
-        if detail_bits:
-            lines.append(_paint("      " + "  ·  ".join(detail_bits), _DIM, colour))
-
-    if analysis.truncated:
-        lines.append(
-            _paint(f"      ({analysis.truncated} further files not read)", _DIM, colour)
-        )
-    if analysis.failed_signals:
-        # Surface checks that failed instead of treating them as quiet.
-        lines.append(
-            _paint(
-                "  ! these checks could not run: "
-                + ", ".join(sorted(set(analysis.failed_signals))),
-                _COLOURS[Verdict.MESSY],
-                colour,
+    codes = ",".join(finding.code for finding in analysis.findings) or "-"
+    return [
+        "\t".join(
+            (
+                f"{analysis.score:g}",
+                verdict,
+                str(analysis.n_files),
+                _display_path(analysis.path, opts.root),
+                codes,
             )
         )
-    return lines
+    ]
 
 
 def render_text(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
-    judged = [a for a in analyses if a.judged]
-    flagged = [a for a in judged if a.verdict >= opts.min_verdict]
-    shown = judged if opts.show_all else flagged
-
-    blocks: list[str] = []
-    for analysis in sorted(shown, key=lambda a: (-a.score, str(a.path))):
-        block = render_dir(analysis, opts)
-        if block:
-            blocks.append("\n".join(block))
-
-    if not blocks:
-        if not judged:
-            return _paint(
-                "Nothing here has enough in it to judge.", _DIM, opts.colour
-            )
-        return _paint(
-            f"No mess found. {len(judged)} folder{'s' if len(judged) != 1 else ''} looked at.",
-            _COLOURS[Verdict.TIDY],
-            opts.colour,
-        )
-
-    out = "\n\n".join(blocks)
-    if len(judged) > 1:
-        worst = max(shown, key=lambda a: a.score)
-        summary = (
-            f"{len(flagged)} of {len(judged)} folders are a mess — "
-            f"worst is {_display_path(worst.path, opts.root)} at {worst.score:g}."
-        )
-        out += "\n\n" + _paint(summary, _BOLD, opts.colour)
-    return out
+    """Render selected folders as newline-delimited TSV records."""
+    shown = visible_analyses(analyses, opts)
+    return "\n".join(
+        render_dir(analysis, opts)[0]
+        for analysis in sorted(shown, key=lambda a: (-a.score, str(a.path)))
+    )
 
 
 def visible_analyses(
