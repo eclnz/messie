@@ -148,14 +148,12 @@ def to_dict(analysis: DirAnalysis) -> dict:
             ),
         }
 
-    return {
+    payload = {
         "path": str(analysis.path),
         "files": analysis.n_files,
-        "truncated": analysis.truncated,
         "score": analysis.score,
         "verdict": _VERDICT_LABELS[analysis.verdict],
         "clusters": analysis.clusters,
-        "failed_signals": analysis.failed_signals,
         "findings": [
             {
                 "code": f.code,
@@ -168,6 +166,11 @@ def to_dict(analysis: DirAnalysis) -> dict:
             for f in analysis.findings
         ],
     }
+    if analysis.failed_signals:
+        payload["failed_signals"] = analysis.failed_signals
+    if analysis.truncated:
+        payload["truncated"] = analysis.truncated
+    return payload
 
 
 def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:

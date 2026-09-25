@@ -47,10 +47,33 @@ def test_json_output_is_valid_and_complete(messy_tree, capsys):
     folder = payload["folders"][0]
     assert "embedder" not in folder
     assert "judged" not in folder
+    assert "failed_signals" not in folder
     assert folder["verdict"] in {"tidy", "lived-in", "messy", "chaotic"}
     assert 0 <= folder["score"] <= 100
     assert any(f["code"] == "unrelated_topics" for f in folder["findings"])
     assert code == 1
+
+
+def test_json_includes_optional_diagnostics_only_when_present(tmp_path):
+    from messie.report import to_dict
+    from messie.result import DirAnalysis
+
+    complete = DirAnalysis(path=tmp_path, embedder="test", n_files=6)
+    incomplete = DirAnalysis(
+        path=tmp_path,
+        embedder="test",
+        n_files=6,
+        truncated=14,
+        failed_signals=["duplicates", "unrelated_topics"],
+    )
+
+    assert "failed_signals" not in to_dict(complete)
+    assert "truncated" not in to_dict(complete)
+    assert to_dict(incomplete)["failed_signals"] == [
+        "duplicates",
+        "unrelated_topics",
+    ]
+    assert to_dict(incomplete)["truncated"] == 14
 
 
 def test_fail_over_threshold_is_respected(messy_tree, capsys):
