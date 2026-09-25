@@ -13,9 +13,10 @@ $ messie ~/Downloads
 ## Install
 
 ```bash
-pip install messie
-pip install 'messie[pdf]'     # PDF text extraction
-pip install 'messie[photos]'  # image metadata, when available
+git clone https://github.com/eclnz/messie.git
+uv sync
+uv tool install --editable .
+uv tool update-shell
 ```
 
 The [wordllama](https://pypi.org/project/wordllama/) model ships with the
