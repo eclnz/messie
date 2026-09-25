@@ -1,18 +1,4 @@
-"""Materialising real files of many kinds.
-
-Every builder writes a file with a genuine header and container structure for
-its format, so messie's extension tables, kind detection and text extraction
-all see something honest.
-
-The text-bearing formats — .docx, .pptx, .xlsx, .odt, .epub, .pdf, .rtf,
-.ipynb, .srt and the plain-text family — carry their content for real, because
-extracting it is the thing under test.
-
-Media and binary formats are structurally valid stubs, not real photographs or
-recordings: correct magic bytes and containers, then deterministic filler.
-messie never decodes them, so shape is all that is needed, and generating a
-genuine JPEG would test the generator rather than the tool.
-"""
+"""Build structurally valid files for fixture data."""
 
 from __future__ import annotations
 
@@ -26,16 +12,13 @@ import textwrap
 import zipfile
 from pathlib import Path
 
-# --- helpers ---------------------------------------------------------------
-
-
 def _prepare(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def _filler(seed: str, size: int) -> bytes:
-    """Deterministic pseudo-random bytes, so a fixture is identical every run."""
+    """Return deterministic filler bytes."""
     out = bytearray()
     block = seed.encode("utf-8")
     while len(out) < size:
@@ -56,9 +39,6 @@ def _xml_escape(text: str) -> str:
 def _paragraphs(text: str) -> list[str]:
     parts = [p.strip() for p in text.split("\n") if p.strip()]
     return parts or [text.strip() or "(empty)"]
-
-
-# --- plain text family -----------------------------------------------------
 
 
 def write_plain(path: Path, text: str) -> Path:
@@ -107,8 +87,6 @@ def write_rtf(path: Path, text: str) -> Path:
     _prepare(path).write_text(content, encoding="ascii", errors="replace")
     return path
 
-
-# --- OOXML / ODF / EPUB ----------------------------------------------------
 
 _OOXML = "http://schemas.openxmlformats.org"
 _ODF = "urn:oasis:names:tc:opendocument:xmlns"
@@ -206,15 +184,12 @@ def write_epub(path: Path, text: str) -> Path:
     return path
 
 
-# --- PDF -------------------------------------------------------------------
-
-
 def _pdf_escape(line: str) -> str:
     return line.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
 
 
 def write_pdf(path: Path, text: str) -> Path:
-    """A real PDF whose text a PDF reader can extract."""
+    """Write a PDF with extractable text."""
     drawn = ["BT", "/F1 11 Tf", "14 TL", "56 760 Td"]
     for paragraph in _paragraphs(text):
         for line in textwrap.wrap(paragraph, 88)[:40]:
@@ -248,8 +223,6 @@ def write_pdf(path: Path, text: str) -> Path:
     return path
 
 
-# --- media and binaries ----------------------------------------------------
-
 _PNG_1PX = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
@@ -261,7 +234,7 @@ def _iso_box(brand: bytes, compatible: bytes = b"mp41isom") -> bytes:
 
 
 def write_image(path: Path, size: int = 24_000, seed: str = "img") -> Path:
-    """JPEG, PNG, GIF, HEIC or a raw camera file, by extension."""
+    """Write an image-like file for the extension."""
     ext = path.suffix.lower().lstrip(".")
     if ext == "png":
         head, tail = _PNG_1PX, b""
@@ -272,8 +245,7 @@ def write_image(path: Path, size: int = 24_000, seed: str = "img") -> Path:
     else:  # jpeg family and raw formats all lead with the JFIF marker
         head = b"\xff\xd8\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01\x00"
         head += b"\x00\x01\x00\x01\x00\x00"
-        # A frame header, so the stub reports dimensions the way a real
-        # photograph does rather than refusing to say how big it is.
+        # Include a JPEG frame header with dimensions.
         head += b"\xff\xc0" + struct.pack(">HBHHB", 11, 8, 3024, 4032, 1)
         head += b"\x01\x11\x00"
         tail = b"\xff\xd9"
@@ -315,7 +287,7 @@ def write_font(path: Path, size: int = 40_000, seed: str = "font") -> Path:
 
 
 def write_installer(path: Path, size: int = 400_000, seed: str = "app") -> Path:
-    """Windows .exe/.msi, macOS .dmg/.pkg, Linux .deb/.AppImage."""
+    """Write an installer-like file."""
     ext = path.suffix.lower().lstrip(".")
     if ext in {"exe", "msi"}:
         head = b"MZ" + _filler(seed, 58) + struct.pack("<I", 64) + b"PE\x00\x00"
@@ -343,7 +315,7 @@ def write_disk_image(path: Path, size: int = 600_000, seed: str = "iso") -> Path
 
 
 def write_archive(path: Path, members: dict[str, str] | None = None) -> Path:
-    """A real .zip or .tar.gz holding real members."""
+    """Write a ZIP or tar archive."""
     members = members or {"readme.txt": "Archived copy of the project files.\n"}
     name = path.name.lower()
     _prepare(path)
@@ -365,7 +337,7 @@ def write_archive(path: Path, members: dict[str, str] | None = None) -> Path:
 
 
 def write_database(path: Path, rows: list[tuple[str, str]] | None = None) -> Path:
-    """A real SQLite file, header and all."""
+    """Write a SQLite database."""
     _prepare(path)
     path.unlink(missing_ok=True)
     connection = sqlite3.connect(str(path))
@@ -401,8 +373,6 @@ def write_empty(path: Path) -> Path:
     return path
 
 
-# --- dispatch --------------------------------------------------------------
-
 #: Extensions whose writer carries the supplied text into the file.
 _TEXT_WRITERS = {
     "docx": write_docx, "pptx": write_pptx, "xlsx": write_xlsx,
@@ -431,12 +401,7 @@ _BINARY_WRITERS = {
 
 
 def write_file(path: Path, text: str = "") -> Path:
-    """Write ``path`` as whatever its extension says it is.
-
-    Formats that can hold prose get ``text``; media and binaries get a valid
-    header and deterministic filler, seeded from the filename so a fixture is
-    byte-identical every run.
-    """
+    """Write a fixture matching ``path``'s extension."""
     ext = path.suffix.lower().lstrip(".")
     if path.name.lower().endswith((".tar.gz", ".tar.bz2")):
         return write_archive(path)

@@ -1,17 +1,4 @@
-"""Finding real directories on this machine to judge.
-
-Every fixture in this repo was authored alongside the code it exercises, and
-that is how a bad feature once passed: eight flavours of synthetic nonsense
-written in the same hour as the eight checks that caught them. The filesystem
-is the antidote — large, free, and arranged by nobody with messie in mind.
-
-A package directory is coherent by construction: one project, one purpose. So
-the share of them that reads as messy is a false-positive rate measured against
-a sample the tool cannot have been fitted to.
-
-Both ``tests/test_real_world.py`` and ``scripts/calibrate.py`` select their
-folders from here, so the guard and the report are looking at the same thing.
-"""
+"""Discover suitable real directories for tests."""
 
 from __future__ import annotations
 
@@ -19,7 +6,7 @@ import os
 import sysconfig
 from pathlib import Path
 
-#: Enough folders for a rate to mean anything.
+#: Minimum sample size for a useful rate.
 MINIMUM_FOLDERS = 25
 DEFAULT_LIMIT = 90
 
@@ -27,7 +14,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def real_roots() -> list[Path]:
-    """Trees that exist on any machine with Python installed, plus this repo."""
+    """Return available Python and repository trees."""
     roots = []
     for key in ("stdlib", "purelib", "platlib"):
         path = sysconfig.get_paths().get(key)
@@ -39,12 +26,7 @@ def real_roots() -> list[Path]:
 
 
 def coherent_folders(limit: int = DEFAULT_LIMIT) -> list[Path]:
-    """Real directories with enough files in them to be worth judging.
-
-    Directories named like tests are skipped: a test-data folder is a grab bag
-    on purpose and proves nothing either way. The walk is sorted so the same
-    machine yields the same folders, and a rate is comparable between runs.
-    """
+    """Return deterministic real folders with enough files to judge."""
     found: list[Path] = []
     for root in real_roots():
         for dirpath, dirnames, filenames in os.walk(root):

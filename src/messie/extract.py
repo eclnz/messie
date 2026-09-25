@@ -7,6 +7,7 @@ import re
 import zipfile
 from html import unescape
 from pathlib import Path
+from typing import BinaryIO, cast
 
 from messie.config import DEFAULT_SETTINGS, Settings
 from messie.kinds import is_textual
@@ -264,7 +265,7 @@ def _from_pdf(path: Path, limit: int, max_bytes: int) -> str:
         if path.stat().st_size > max_bytes:
             return ""
         with path.open("rb", buffering=0) as source:
-            reader = PdfReader(_BudgetReader(source, max_bytes))
+            reader = PdfReader(cast(BinaryIO, _BudgetReader(source, max_bytes)))
             chunks = []
             for page in reader.pages[:_MAX_PDF_PAGES]:
                 chunks.append(page.extract_text() or "")

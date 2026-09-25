@@ -306,17 +306,8 @@ def test_unavailable_embedder_is_an_error(tmp_path, capsys, monkeypatch):
     assert main([str(tmp_path)]) == 2
 
 
-# --- --verbose --------------------------------------------------------------
-#
-# The whole point of the flag is watching a long run, so what these guard is
-# that it stays out of the way of everything else: stdout unchanged, JSON still
-# parseable, and the folder named before it is read rather than after, which is
-# what makes the last line printed the one that names a crashing folder.
-
-
 def test_verbose_writes_nothing_to_stdout(messy_tree, capsys):
-    """Progress belongs on stderr. If it leaks into stdout, every pipeline
-    built on messie breaks the day someone adds -v to it."""
+    """Progress belongs on stderr."""
     main([str(messy_tree), "--no-color"])
     plain = capsys.readouterr().out
 
@@ -345,8 +336,7 @@ def test_verbose_names_every_stage_and_the_cost(messy_tree, capsys):
 
 
 def test_progress_reports_a_folder_before_reading_it(tmp_path):
-    """Named before, not after. A folder whose contents make an extractor throw
-    is only identifiable from the log if its name was printed on the way in."""
+    """Progress identifies a folder before reading it."""
     from messie.analyze import Progress, analyze_tree
 
     (tmp_path / "sub").mkdir()

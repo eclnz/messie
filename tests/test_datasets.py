@@ -1,9 +1,4 @@
-"""The example datasets, and what messie makes of them.
-
-These run the whole pipeline over realistic folders built from the corpora —
-many file kinds, many subjects — and check both halves of the job: that a mess
-is called a mess, and that a folder which is merely full is left alone.
-"""
+"""Dataset-level analysis tests."""
 
 from __future__ import annotations
 
@@ -30,8 +25,7 @@ from messie.analyze import analyze_dir
 from messie.kinds import Kind
 from messie.result import Verdict
 
-#: Subjects that do not hold together under the default embedder, and why.
-#: Measured against the example corpus: 34 of 35 topics form a single group.
+#: Subjects that do not hold together under the default embedder.
 KNOWN_WEAK = {
     "car_maintenance": "six unrelated garage jobs share little beyond the car itself",
 }
@@ -40,9 +34,6 @@ KNOWN_WEAK = {
 @pytest.fixture
 def real_embedder():
     return embedder_or_skip()
-
-
-# --- the corpora themselves -------------------------------------------------
 
 
 def test_corpus_contract():
@@ -66,17 +57,6 @@ def test_the_datasets_are_varied():
     assert len(kinds) >= 12
     assert OFFICE_TOPICS and DEV_TOPICS and PERSONAL_TOPICS
 
-# @pytest.mark.parametrize("topic", [t for t in ALL_TOPICS if t not in KNOWN_WEAK])
-# def test_each_topic_reads_as_one_subject(topic, tmp_path, semantic_embedder):
-#     """Six files on one subject must form exactly one group.
-
-#     A corpus topic whose own entries do not cluster would make every test built
-#     on it meaningless, so this guards the ground truth as much as the tool.
-#     """
-#     folder = build_coherent(tmp_path / topic, topic, 6)
-#     analysis = analyze_dir(folder, embedder=semantic_embedder)
-
-
 @pytest.mark.parametrize("topic", [t for t in ALL_TOPICS if t not in KNOWN_WEAK])
 def test_a_single_subject_folder_is_not_a_mess(topic, tmp_path, real_embedder):
     folder = build_coherent(tmp_path / topic, topic, 6)
@@ -84,9 +64,6 @@ def test_a_single_subject_folder_is_not_a_mess(topic, tmp_path, real_embedder):
     assert "unrelated_topics" not in codes(analysis)
     assert "no_common_thread" not in codes(analysis)
     assert analysis.verdict < Verdict.MESSY
-
-
-# --- mess -------------------------------------------------------------------
 
 
 def test_three_unrelated_domains_in_one_folder(tmp_path, real_embedder):
@@ -102,17 +79,11 @@ def test_three_unrelated_domains_in_one_folder(tmp_path, real_embedder):
 
 
 def test_a_folder_where_every_file_is_its_own_topic(tmp_path, real_embedder):
-    """The hardest case: nothing groups, because nothing belongs together.
-
-    The clustering signal cannot fire here — there are no groups to compare —
-    so this is exactly where a tool that only looks for structure goes quiet.
-    """
     folder = build_assorted(tmp_path / "Desktop", 18)
     analysis = analyze_dir(folder, embedder=real_embedder)
 
     assert "no_common_thread" in codes(analysis)
     assert analysis.verdict >= Verdict.MESSY
-    # It is not described as a few files standing out: it is all of them.
     assert "strays" not in codes(analysis)
 
 
@@ -143,9 +114,6 @@ def test_a_realistic_downloads_drawer(tmp_path, real_embedder):
         assert expected in found, f"{expected} missing from {found}"
 
 
-# --- restraint --------------------------------------------------------------
-
-
 def test_photo_album_is_left_alone(tmp_path, real_embedder):
     folder = build_album(tmp_path / "Wedding", 30)
     assert analyze_dir(folder, embedder=real_embedder).verdict == Verdict.TIDY
@@ -170,13 +138,6 @@ def test_one_subject_in_many_formats_is_not_a_mess(tmp_path, real_embedder):
 
 
 def test_a_big_folder_of_one_subject_is_left_alone(tmp_path, real_embedder):
-    """Ninety documents on one subject: large, and not a mess.
-
-    This used to assert ``overcrowded`` fired, back when size alone counted as
-    evidence. It is the shape of a camera roll or a dataset directory, and on a
-    real workspace that reading was wrong far more often than it was right, so
-    the signal now has to be asked for.
-    """
     from messie.config import DEFAULT_SETTINGS
 
     folder = build_coherent(tmp_path / "Scans", OFFICE_TOPICS[0], 90)
@@ -185,14 +146,11 @@ def test_a_big_folder_of_one_subject_is_left_alone(tmp_path, real_embedder):
     assert "unrelated_topics" not in codes(analysis)
     assert "no_common_thread" not in codes(analysis)
 
-    # Asked for, it is still there and still says the true thing.
     asked = analyze_dir(
         folder, DEFAULT_SETTINGS.with_(report_crowding=True), embedder=real_embedder
     )
     assert "overcrowded" in codes(asked)
 
-
-# --- formats ----------------------------------------------------------------
 
 _TEXT_FORMATS = ["docx", "pptx", "xlsx", "odt", "epub", "pdf", "rtf", "ipynb", "srt",
                  "txt", "md", "csv", "json", "yaml", "py", "sql", "log"]
@@ -234,11 +192,8 @@ def test_binary_formats_are_recognised_by_kind(ext, kind, tmp_path):
     assert entry.size > 0
 
 
-# --- the whole demo tree ----------------------------------------------------
-
-
 def test_demo_tree(tmp_path, real_embedder):
-    """The generator in scripts/ must produce a tree with a sensible verdict spread."""
+    """The demo tree has a representative verdict spread."""
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))

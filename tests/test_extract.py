@@ -176,7 +176,7 @@ def test_pdf_larger_than_the_read_budget_is_not_parsed(tmp_path: Path, monkeypat
             opened = True
 
     module = types.ModuleType("pypdf")
-    module.PdfReader = Reader
+    setattr(module, "PdfReader", Reader)
     monkeypatch.setitem(sys.modules, "pypdf", module)
 
     settings = DEFAULT_SETTINGS.with_(max_read_bytes=10)
@@ -202,7 +202,7 @@ def test_pdf_extraction_stops_after_two_pages(tmp_path: Path, monkeypatch):
             self.pages = [Page(number) for number in range(5)]
 
     module = types.ModuleType("pypdf")
-    module.PdfReader = Reader
+    setattr(module, "PdfReader", Reader)
     monkeypatch.setitem(sys.modules, "pypdf", module)
 
     assert extract_text(_entry(path)) == "page 0 page 1"

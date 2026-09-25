@@ -1,13 +1,4 @@
-"""What must hold for any folder at all.
-
-The tests elsewhere check that messie is right about folders somebody designed.
-These check that it is well-behaved about folders nobody designed: that it
-never crashes, never contradicts itself, never disagrees with itself between
-two runs, and never touches a byte.
-
-Folders here are composed at random from every builder available, so the shapes
-are ones no one thought to write a test for.
-"""
+"""Analysis invariants."""
 
 from __future__ import annotations
 
@@ -47,7 +38,7 @@ def embedder():
 
 
 def _compose(folder: Path, seed: int) -> Path:
-    """A folder of whatever this seed happens to produce."""
+    """Build a deterministic mixed folder."""
     rng = random.Random(seed)
     folder.mkdir(parents=True, exist_ok=True)
     for _ in range(rng.randrange(1, 4)):
@@ -99,9 +90,6 @@ def test_analysis_never_writes(seed, tmp_path, embedder):
     before = snapshot(folder)
     analyze_dir(folder, embedder=embedder)
     assert snapshot(folder) == before
-
-
-# --- shapes nobody would think to write a test for --------------------------
 
 
 def test_empty_folder(tmp_path, embedder):
@@ -257,7 +245,7 @@ def test_os_walk_is_not_confused_by_a_file_named_like_a_directory(tmp_path, embe
 
 
 def test_analysis_of_the_repo_itself(embedder):
-    """messie on its own source: the most convenient real folder there is."""
+    """Analyze messie's own source tree."""
     here = Path(__file__).resolve().parent.parent / "src" / "messie"
     if not here.is_dir():
         pytest.skip("source tree not present")
@@ -267,22 +255,13 @@ def test_analysis_of_the_repo_itself(embedder):
 
 
 def test_text_that_half_decodes_does_not_crash_the_model(tmp_path):
-    """Undecodable bytes must survive as far as the embedder without killing it.
-
-    messie reads with ``surrogateescape`` so that a file of mixed encodings
-    round-trips rather than throwing. The lone surrogates that leaves are
-    rejected outright by the Rust tokenizer underneath wordllama, which turned
-    a slightly odd binary into a crashed run: CPython's own
-    ``test/archivetestdata/testtar.tar`` did it, so any scan of a stock Python
-    installation hit it.
-    """
+    """Partially decoded text must not crash the embedder."""
     from messie.analyze import analyze_dir
 
     folder = tmp_path / "mixed"
     folder.mkdir()
     for i in range(6):
         (folder / f"note_{i}.txt").write_text(f"gardening notes about compost {i}")
-    # Exactly what surrogateescape produces from undecodable Latin-1 bytes.
     (folder / "odd.bin").write_bytes(b"umlauts \xc4\xd6\xdc\xe4\xf6\xfc\xdf longname")
 
     analysis = analyze_dir(folder)

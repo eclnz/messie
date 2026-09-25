@@ -1,268 +1,97 @@
 # messie
 
-Notices when a folder has become a mess.
+Messie finds folders whose files cover unrelated subjects. It reads the files,
+groups them by subject, and reports where a folder looks mixed, with examples.
+Analysis runs locally and never changes files.
 
-It does not tidy anything. It never moves, renames or deletes a file, and it
-does not propose a filing scheme — what belongs where is your call. All it does
-is read what is actually in a folder and tell you, with evidence, when unrelated
-things have ended up living together.
-
-Everything runs on your machine. No API keys, no accounts, no network calls
-during analysis.
-
-```
+```text
 $ messie ~/Downloads
 
 ~/Downloads                                    CHAOTIC  89.7/100   30 files · wordllama
   4 unrelated things are living in this folder.
-      · no shared wording              9 files  2023   IMG_4400.jpg, IMG_4401.jpg +7
       · agreement · lease · meeting    6 files  2026   lease agreement.txt +5
       · invoice · billed · hours       4 files  2026   invoice_1040.docx +3
-      · batter · into · loaf           4 files  2025   banana_bread_recipe_0.md +3
   6 files here are copies of something else here.
-  4 different sorts of file are mixed together here.
-      11 text, 9 image, 4 document, 3 installer
   4 files here are debris.
-      empty, leftover  ·  .DS_Store, Untitled 3.txt, statement.pdf.crdownload
-  1 pile of revisions of the same thing (4 files).
-      The deepest is 'lease agreement' at 4 versions.
 ```
-
-## The point
-
-Most "folder cleaner" tools sort by extension, which means a folder holding
-forty Word documents looks perfectly uniform to them. If half of those documents
-are tax paperwork and half are chapters of a novel, that folder is a mess, and
-only the *contents* say so.
-
-So messie reads the files. It pulls text out of each one, embeds it locally,
-groups the folder by subject, and reports when the groups have nothing to do
-with each other.
 
 ## Install
 
 ```bash
 pip install messie
+pip install 'messie[pdf]'     # PDF text extraction
+pip install 'messie[photos]'  # image metadata, when available
 ```
 
-That is the whole story. messie depends on
-[wordllama](https://pypi.org/project/wordllama/), whose model weights ship
-inside its wheel, so nothing is downloaded at analysis time — or ever — and it
-works on a machine that has never been online.
-
-`pip install 'messie[pdf]'` adds PDF text extraction.
+The [wordllama](https://pypi.org/project/wordllama/) model ships with the
+package.
 
 ## Use
 
 ```bash
-messie                        # the current folder and its subfolders
-messie ~/Documents            # somewhere specific
-messie ~/Drive --depth 5      # look deeper (default 3)
-messie ~/Downloads --all      # show tidy folders too
-messie ~/Downloads --json     # machine-readable
-messie ~/Drive -v             # watch it work, on stderr
-messie ~/Pictures -c          # also grumble about folders holding a lot of files
+messie                        # current folder and its subfolders
+messie ~/Documents            # a specific folder
+messie ~/Drive --depth 5      # recurse further; default is 3
+messie ~/Downloads --all      # include tidy folders
+messie ~/Downloads --json     # JSON output
+messie ~/Drive -v             # progress on stderr
+messie ~/Pictures -c          # include crowding observations
 ```
 
-Exit status is 0 while everything is below the `--fail-over` verdict (default
-`messy`) and 1 once something reaches it, so it drops into a cron job or a
-pre-commit hook:
+The command exits with 1 when a folder reaches `--fail-over` (default:
+`messy`), so it can be used in scheduled checks:
 
 ```bash
-messie ~/Downloads --fail-over chaotic || notify-send "your Downloads folder"
+messie ~/Downloads --fail-over chaotic || notify-send 'Downloads needs sorting'
 ```
 
 ## What it looks for
 
-| | |
+| Signal | Meaning |
 |---|---|
-| **unrelated topics** | two or more unrelated subjects sharing one folder — the main event |
-| **nothing in common** | no organising subject at all: every file about something different |
-| **strays** | files that match nothing else present |
-| **misfiled neighbours** | loose files that read like the contents of a folder further down |
-| **overcrowded** | a lot of files loose in one flat folder — off by default, `-c` turns it on |
-| **debris** | `~$report.docx`, `.crdownload`, `.DS_Store`, zero-byte and never-named files |
-| **version pileups** | `report.docx`, `report_final.docx`, `report_final_v2 (copy).docx` |
-| **duplicates** | byte-identical files, and text that really is the same document twice |
-| **time strata** | separate eras of stuff on separate subjects — a folder that accreted rather than got filled |
+| unrelated topics | distinct subjects sharing a folder |
+| nothing in common | no subject connects the files |
+| strays | files that do not fit a meaningful group |
+| misfiled neighbours | loose files resembling a subfolder's contents |
+| overcrowded | many loose files; opt in with `-c` |
+| debris | temporary, empty, or never-named files |
+| version pileups | multiple revisions of one file |
+| duplicates | identical bytes or duplicate text |
+| time strata | unrelated material accumulated in separate periods |
 
-Each fires with a severity, and they combine into a 0–100 score:
-**tidy** (0–24) · **lived-in** (25–49) · **messy** (50–74) · **chaotic** (75–100).
+Signals combine into a score: **tidy** (0–24), **lived-in** (25–49),
+**messy** (50–74), or **chaotic** (75–100). Folders with fewer than six files
+are too small to judge.
 
-A folder with fewer than six files is reported as too small to judge rather than
-being given a score.
+## Notes
 
-## Embedding
+Messie reads plain text, common office formats, HTML, CSV, source code, and
+subtitles directly. PDF support is optional. For files without readable text,
+it uses filenames, file kinds, and limited metadata. It does not use OCR or
+image recognition.
 
-Messie uses [wordllama](https://pypi.org/project/wordllama/), whose weights
-ship inside its wheel. The command-line tool deliberately has no model choice.
+Embeddings compare broad subject matter rather than detailed argument. The
+default model is strongest on English; use `--threshold` to tune clustering for
+your folders.
 
-Library callers can supply any object satisfying the `Embedder` protocol to
-`analyze_dir` or `analyze_tree`; that is the seam for experiments or a future
-replacement. Thresholds are relative to an embedder's similarity scale, and
-`--threshold` remains available for calibration.
+## Example data
 
-Every threshold constant is fitted by `scripts/calibrate.py`, which reports a
-plateau as well as a peak and refuses to recommend a value when its sample is
-too small to support one. `misfiled_margin_rel` is currently in that state and
-ships as an admitted guess.
-
-### Why crowding is opt-in
-
-`overcrowded` is the only signal that never opens a file. It counts them — and
-counting is the judgement messie exists to argue against. A folder holding one
-thing is not a mess for holding nine hundred of it.
-
-Measured over a real workspace of 254 judged folders, it fired on 34 and was
-the *only* finding on 26 of them. Every large one was 100% a single kind, one
-or two extensions, one cluster: camera rolls, image datasets, log directories.
-Sixteen were already **tidy**, so it spoke and changed nothing; the other ten
-it nudged to **lived-in** on no evidence of mess at all. In the eight folders
-where it fired alongside something else, that something else had already made
-the case.
-
-So it carries almost no unique signal and a good deal of noise. It is still
-here, because "this folder has 900 files in it" is a fair thing to want to be
-told — it is just not evidence of mess. `-c` / `--crowding` asks for it.
-
-## Reading the contents
-
-`.docx`, `.pptx`, `.xlsx`, `.odt` and `.epub` are read with the standard library
-alone — they are zips of XML, so no third-party parser is needed. Plain text,
-Markdown, HTML, CSV, source code and subtitles are read directly, with an
-encoding sniff. PDFs need the `pdf` extra. Only the first 4 KB of text is used,
-and never more than 1 MiB is read off disk per file.
-
-Photos, video and audio are not opened. A file with no readable text and no
-meaningful filename — `IMG_4412.HEIC` — is represented by its kind, so it groups
-with the other photos instead of looking like a stray. This is why a folder of
-holiday photos reads as tidy rather than as hundreds of unrelated things.
-
-## Reading binaries
-
-Photographs, music and installers cannot be read, so every one of them used to
-be represented by the same stand-in phrase — `photograph picture image` for
-every photograph anybody has ever taken. Three kinds of file now say something
-about themselves, using the standard library alone:
-
-- **archives** — the member list. A zip of holiday photos and a zip of tax
-  papers are plainly different things, and the manifest says so.
-- **fonts** — family and foundry from the sfnt name table, worth 0.60 of
-  separation between real font directories where there was none.
-- **images** — dimensions, which is thin, but is what stopped a real folder of
-  bullet graphics fragmenting into fifteen meaningless groups.
-
-Byte-level similarity was tried first and measured. Normalized compression
-distance separates same-folder from cross-folder files by 0.72 for SVG (which
-is really text) and 0.13 for shared libraries, but by only 0.016 for PNG, 0.005
-for TrueType and 0.002 for gzip: compressed formats are entropy-coded, so their
-bytes look random whatever the content. It cannot see photographs, so it is not
-used.
-
-EXIF and audio tags were built and then removed. Telling one camera's
-photographs from another's is discrimination between things that are alike, and
-a Pictures folder holding two cameras is normal rather than messy — the
-capability cost two dependencies and changed no verdict. messie is for noticing
-obviously mixed content, not for splitting hairs.
-
-## What was removed, and why
-
-Two signals were deleted after being measured against real files rather than
-against fixtures:
-
-- **garbled** flagged files whose contents had stopped being language. Across
-  5,080 real files it flagged 143 — **2.81%, every one of them wrong** — while
-  finding no genuinely garbled file at all. `# --- section ---` comments tripped
-  it, so it flagged messie's own source, and flagged files were silently
-  dropped from clustering. It handled a rare case with hand-tuned thresholds
-  and had been validated on eight flavours of synthetic nonsense written in the
-  same hour as the eight checks that caught them.
-- **type soup** fired on more folders than any other signal and never once
-  changed a verdict band. A signal that decides nothing is weight without a
-  vote.
-
-Real directories are now a permanent part of the test suite
-(`tests/test_real_world.py`). They are large, free, and nobody arranged them to
-suit messie. On 75 coherent package directories, **1.3% read as messy**, down
-from 16.0% before those deletions and before `misfiled_neighbours` stopped
-reporting packages for resembling their own subpackages.
-
-## Limitations
-
-- **Static embeddings are coarse.** They compare subject matter, not argument.
-  Measured across the 37-subject example corpus, the embedder keeps 76% of
-  single-subject folders together and 92% of unrelated pairs apart.
-- **One mixed folder in seven goes unremarked.** `unrelated_rel` was refitted
-  against real directories and moved from 0.55 to 0.25, which cut false alarms
-  on coherent folders sharply and cost recall on genuinely mixed ones — 98%
-  down to 85%. That trade weights a miss and a false alarm equally, which is a
-  choice, and `config.py` records where the other end of the plateau sits.
-- **Photographs are taken on trust.** There is no vision model here. Images
-  contribute their dimensions and their filenames, nothing more, so two camera
-  rolls in one folder read as one thing — which is the intended answer.
-- **Audio and video say nothing beyond their filenames.**
-- **`unrelated_topics` fires on 8% of real package directories.** Those are
-  libraries rather than personal folders, and the thresholds are deliberately
-  not tuned to them, but the number is worth knowing.
-- **Where the line falls is a judgement call.** Are tax returns and client
-  invoices one subject or two? It will usually say one. Tune with `--threshold`
-  if your sense of it differs.
-- **Scanned PDFs have no text to read.** There is no OCR.
-- **messie is built for English.** Other Latin-script languages mostly work,
-  but the embedder tends to group non-English documents by language
-  rather than by subject, so verdicts on them are unreliable.
-
-## Example datasets
-
-`tests/corpus/` holds 37 subjects and 222 documents across three domains —
-office paperwork, developer files and personal clutter — together with builders
-that turn any of it into real files of thirty-odd types. `.docx`, `.pptx`,
-`.xlsx`, `.odt`, `.epub`, `.pdf`, `.rtf`, `.ipynb` and the plain-text family
-carry their text for real; photos, audio, video, installers, disk images,
-archives, fonts and SQLite files get genuine headers and containers, because
-messie never decodes those and generating a real JPEG would only test the
-generator.
-
-To see it work on something substantial:
+`tests/corpus/` contains synthetic documents and builders for test folders.
+Build a demonstration tree with:
 
 ```bash
-python scripts/build_demo_tree.py /tmp/demo
-messie /tmp/demo --all
+uv run python scripts/build_demo_tree.py /tmp/messie-demo
+uv run messie /tmp/messie-demo --all
 ```
-
-That writes ~190 files across 29 extensions into folders ranging from genuinely
-tidy to hopeless: a Downloads drawer of unrelated subjects and debris, loose
-paperwork sitting beside the subfolder it belongs with, a wedding album, a music
-library, a coherent code project, and a Desktop where every single file is about
-something different. Everything is synthetic and deterministic for a given seed.
-
-The builders are also what the tests are made of, so a folder that catches a
-false positive can be turned into a regression test directly.
 
 ## Development
 
 ```bash
-pip install -e '.[semantic,dev]'
-pytest
-ruff check src tests
+uv sync --all-groups --extra dev --extra all
+uv run pytest
+uv run pyright
+uv run ruff check src tests
 ```
 
-`-v` / `--verbose` shows the walk as it happens — scanning, then reading, then
-judging, with a running count and the folder in hand. It goes to stderr, so
-`messie ~/Drive --json -v | jq` still works, and it names each folder *before*
-reading it: when a file makes an extractor throw, the last line printed is the
-folder holding it.
-
-`MESSIE_DEBUG=1` makes a signal that raises crash instead of being skipped.
-
-The test suite builds real folders on disk and runs the whole pipeline against
-the real embedder. As well as the signals themselves it checks that every
-corpus subject is internally coherent — ground truth the other tests depend on —
-that text survives a round trip through each readable format, that every file
-type is recognised by kind, and that analysing a folder leaves every file in it
-byte-for-byte untouched.
-
-Most of the legibility tests guard against false positives rather than
-detection, because that is where the risk lies: calling somebody's minified
-JavaScript or Chinese-language report "gibberish" would be far worse than
-missing a corrupt download.
+`-v` writes progress to stderr, so JSON stays safe to pipe. Set
+`MESSIE_DEBUG=1` to let signal errors raise during development.

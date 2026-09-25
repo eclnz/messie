@@ -1,8 +1,4 @@
-"""Fixtures that build real folders on disk.
-
-messie reads files, so its tests use real ones — including genuine .docx
-archives, since stdlib OOXML extraction is a load-bearing part of the tool.
-"""
+"""Filesystem fixtures."""
 
 from __future__ import annotations
 
@@ -35,7 +31,7 @@ _RELS = (
 
 
 def write_docx(path: Path, paragraphs: list[str]) -> Path:
-    """A real, minimal .docx — a zip of XML, exactly as Word writes it."""
+    """Write a minimal .docx file."""
     body = "".join(
         f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragraphs
     )
@@ -59,18 +55,13 @@ def write_text(path: Path, text: str) -> Path:
 
 
 def write_blob(path: Path, size: int = 2048, seed: bytes = b"\x89PNG") -> Path:
-    """A binary file with no readable text, standing in for a photo."""
+    """Write unreadable binary data."""
     path.parent.mkdir(parents=True, exist_ok=True)
     filler = (seed + bytes(range(256))) * (size // 260 + 1)
     path.write_bytes(filler[:size])
     return path
 
 
-# --- corpora ---------------------------------------------------------------
-
-# Each corpus repeats its own domain vocabulary, the way real documents of a
-# kind do. Without that the embedder has nothing to go on — it matches
-# words, not meanings.
 TAX = [
     "IRS form W-2: wage and tax statement for the tax filing year. Federal "
     "income tax withheld is reported to the revenue service.",
@@ -81,7 +72,6 @@ TAX = [
     "This tax return was prepared and submitted to the revenue service, with "
     "taxable income and deductions assessed for the filing year.",
 ]
-# Chapters of one novel: recurring people and places, as real chapters have.
 NOVEL = [
     "Chapter one. The rain had not stopped for three days and the house above the "
     "dunes was cold. Marta listened to the sea and did not open the door.",
@@ -116,7 +106,7 @@ RECIPE = [
 
 @pytest.fixture
 def embedder():
-    """The default embedder, shared across tests: loading it is cached."""
+    """Return the default test embedder."""
     from messie.embed import get_embedder
 
     return get_embedder()
@@ -129,7 +119,7 @@ def settings():
 
 @pytest.fixture
 def mixed_docx_dir(tmp_path: Path) -> Path:
-    """The motivating case: one file type, three unrelated subjects."""
+    """Build three unrelated Word-document subjects."""
     folder = tmp_path / "Documents"
     for i, line in enumerate(TAX):
         write_docx(folder / f"tax_return_{2019 + i}.docx", [line] * 3)
@@ -140,8 +130,7 @@ def mixed_docx_dir(tmp_path: Path) -> Path:
     return folder
 
 
-#: Further tax sentences, so the coherent fixture has twelve *distinct*
-#: documents rather than one document repeated (which would be a real finding).
+#: Further sentences for distinct tax documents.
 MORE_TAX = [
     "Schedule A itemised deductions worksheet attached for review.",
     "Employer identification number and payer details for the filing year.",
@@ -156,7 +145,7 @@ MORE_TAX = [
 
 @pytest.fixture
 def coherent_docx_dir(tmp_path: Path) -> Path:
-    """Same file type, same subject, all distinct: not a mess."""
+    """Build a coherent Word-document folder."""
     folder = tmp_path / "Tax"
     for i, line in enumerate(TAX + MORE_TAX):
         write_docx(
@@ -167,12 +156,7 @@ def coherent_docx_dir(tmp_path: Path) -> Path:
 
 
 class FakeEmbedder:
-    """A deterministic stand-in with exactly controllable topics.
-
-    Any text containing a marker word becomes that marker's basis vector, so
-    same-topic pairs score 1.0 and different-topic pairs score 0.0. This lets
-    the signal tests assert on logic rather than on a model's judgement.
-    """
+    """Deterministic marker-based embedder."""
 
     name = "fake"
     scale = 0.5
@@ -197,7 +181,7 @@ def fake_embedder():
 
 
 def snapshot(root: Path) -> dict[str, tuple[int, float]]:
-    """Every file under root with its size and mtime."""
+    """Record file sizes and modification times."""
     return {
         str(p.relative_to(root)): (p.stat().st_size, p.stat().st_mtime)
         for p in sorted(root.rglob("*"))
@@ -205,13 +189,8 @@ def snapshot(root: Path) -> dict[str, tuple[int, float]]:
     }
 
 
-# --- shared helpers ---------------------------------------------------------
-#
-# These lived in three test modules apiece. conftest is already on the import
-# path for every test file, so this is where one copy belongs.
-
 def embedder_or_skip():
-    """The default embedder, or a skip when the installation is incomplete."""
+    """Return the default embedder or skip."""
     from messie.embed import get_embedder
 
     try:
@@ -221,10 +200,10 @@ def embedder_or_skip():
 
 
 def codes(analysis) -> set[str]:
-    """The finding codes an analysis produced."""
+    """Return finding codes."""
     return {f.code for f in analysis.findings}
 
 
 def finding(analysis, code: str):
-    """The one finding with this code. Raises if the signal stayed quiet."""
+    """Return the finding with ``code``."""
     return next(f for f in analysis.findings if f.code == code)

@@ -1,7 +1,4 @@
-"""Whole-pipeline behaviour against the real embedding backends.
-
-The first test here is the one that matters: the case the tool was built for.
-"""
+"""End-to-end analysis tests."""
 
 from __future__ import annotations
 
@@ -18,11 +15,7 @@ def real_embedder():
 
 
 def test_uniform_file_type_unrelated_contents_is_a_mess(mixed_docx_dir, real_embedder):
-    """A folder of Word documents about three different things is messy.
-
-    Nothing about the file listing gives this away — every file is a .docx.
-    Only the contents do.
-    """
+    """Unrelated Word documents are messy."""
     analysis = analyze_dir(mixed_docx_dir, embedder=real_embedder)
 
     assert {f.ext for f in read_dir(mixed_docx_dir).files} == {"docx"}, "the premise: one file type"
@@ -38,7 +31,6 @@ def test_uniform_file_type_coherent_contents_is_tidy(coherent_docx_dir, real_emb
 
     assert analysis.verdict == Verdict.TIDY
     assert analysis.findings == []
-    # The exact grouping belongs to the dataset tests; this only cares that it is quiet.
 
 
 def test_photo_album_is_tidy(tmp_path, real_embedder):
@@ -105,11 +97,7 @@ def test_unreadable_folder_does_not_crash(tmp_path, real_embedder):
 
 
 def test_a_shared_filename_prefix_does_not_hide_the_mess(tmp_path, real_embedder):
-    """Everything named with the same project prefix, on unrelated subjects.
-
-    A word in nearly every filename lifts every pairwise similarity at once. If
-    it were left in, three separate subjects would read as one.
-    """
+    """A shared filename prefix cannot hide unrelated subjects."""
     from conftest import INVOICE, NOVEL, TAX
 
     folder = tmp_path / "ProjectX"

@@ -1,15 +1,4 @@
-"""Cases the corpus could not express until now.
-
-Each of these was untested territory, and between them they turned up an
-ASCII tokeniser that shredded accented words, a cliff between two signals that
-were meant to hand off to each other, an RTF extractor leaking font names into
-every document's text, and a misfiled-file signal that could not see past the
-immediate children of a folder.
-
-Some of them record a blind spot rather than a capability. A limit written
-down as a passing test is a limit somebody can find; a limit left in a
-docstring is one they discover the hard way.
-"""
+"""Regression cases beyond the fixture corpus."""
 
 from __future__ import annotations
 
@@ -36,9 +25,6 @@ def embedder():
     return embedder_or_skip()
 
 
-# --- accented English -------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("stem", "expected"),
     [
@@ -51,8 +37,6 @@ def embedder():
     ],
 )
 def test_accented_words_survive_tokenising(stem, expected):
-    """An ASCII split treated every diacritic as a separator, and quietly
-    destroyed the word around it: ``café`` became ``caf``."""
     assert name_tokens(stem) == expected
 
 
@@ -64,8 +48,6 @@ def test_accents_do_not_break_version_grouping():
 def test_an_accented_subject_reads_as_one_thing(topic, tmp_path, embedder):
     folder = build_coherent(tmp_path / topic, topic, 6)
     analysis = analyze_dir(folder, embedder=embedder)
-    # Exact average-link may leave a weak singleton without inventing another
-    # meaningful subject.  That is still one coherent thing to the product.
     assert analysis.meaningful_clusters == 1
     assert analysis.verdict < Verdict.MESSY
 
@@ -80,11 +62,7 @@ def test_accented_and_plain_subjects_are_told_apart(tmp_path, embedder):
     assert analysis.verdict >= Verdict.MESSY
 
 
-# --- one document, many formats ---------------------------------------------
-
-
 def test_the_same_document_in_several_formats_is_noticed(tmp_path, embedder):
-    """The .docx somebody wrote, the .pdf they sent, the .txt somebody pasted."""
     folder = tmp_path / "formats"
     add_topic(folder, OFFICE_TOPICS[0], 6)
     add_same_document_in_many_formats(folder, PERSONAL_TOPICS[0])
@@ -94,8 +72,6 @@ def test_the_same_document_in_several_formats_is_noticed(tmp_path, embedder):
 
 
 def test_rtf_text_carries_no_font_table(tmp_path):
-    """Stripping RTF control words alone leaves the font *names* behind, so
-    every document's text began with "Helvetica;" or "Times New Roman;"."""
     from messie.extract import extract_text
     from messie.scan import read_dir
 
@@ -113,12 +89,7 @@ def test_rtf_text_carries_no_font_table(tmp_path):
         assert machinery not in text
 
 
-# --- filed away several levels down -----------------------------------------
-
-
 def test_loose_files_matching_a_deep_folder_are_found(tmp_path, embedder):
-    """misfiled_neighbours compared a folder only against its direct children,
-    so a subject filed three levels down was invisible."""
     root = build_nested_misfile(tmp_path / "home", OFFICE_TOPICS[0], PERSONAL_TOPICS[1])
     analysis = analyze_dir(root, embedder=embedder)
 
@@ -127,15 +98,7 @@ def test_loose_files_matching_a_deep_folder_are_found(tmp_path, embedder):
     assert any("/" in where for where in named), f"expected a deep path, got {list(named)}"
 
 
-# --- what we cannot see, recorded as such -----------------------------------
-
-
 def test_a_folder_of_one_line_notes_is_left_alone(tmp_path, embedder):
-    """Short notes do not cluster, and that absence is not evidence of mess.
-
-    Before files this thin were excluded from the reckoning, a folder of eight
-    jotted notes on a single subject scored 39 and was called lived-in.
-    """
     folder = tmp_path / "notes"
     add_short_notes(folder, ACCENTED_TOPICS[1], 8)
     analysis = analyze_dir(folder, embedder=embedder)
@@ -146,12 +109,7 @@ def test_a_folder_of_one_line_notes_is_left_alone(tmp_path, embedder):
 
 
 def test_unrelated_one_line_notes_are_a_known_blind_spot(tmp_path, embedder):
-    """The other side of that coin, and the price of not crying wolf.
-
-    Two unrelated subjects written as one-liners cannot be told apart from one
-    subject written as one-liners, because there is too little to read either
-    way. messie says nothing rather than guessing.
-    """
+    """Sparse unrelated notes are intentionally inconclusive."""
     folder = tmp_path / "notes"
     add_short_notes(folder, ACCENTED_TOPICS[1], 6, seed=1)
     add_short_notes(folder, DEV_TOPICS[2], 6, seed=2)
@@ -159,12 +117,7 @@ def test_unrelated_one_line_notes_are_a_known_blind_spot(tmp_path, embedder):
 
 
 def test_named_photographs_are_a_known_blind_spot(tmp_path, embedder):
-    """Photographs are judged by their names, and names are thin evidence.
-
-    A folder of pictures from two unrelated occasions does not read as mess,
-    because there is no way to read a photograph. Flagging it would mean
-    flagging every album, which is the worse error.
-    """
+    """Named photographs alone are intentionally inconclusive."""
     folder = tmp_path / "Pictures"
     build_named_album(folder, PERSONAL_TOPICS[2], 8, seed=1)
     build_named_album(folder, DEV_TOPICS[0], 8, seed=2)

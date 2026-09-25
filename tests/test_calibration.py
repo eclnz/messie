@@ -1,15 +1,4 @@
-"""The constants in the source must keep matching what measurement says.
-
-messie's thresholds were twice set by guesswork and twice found to be wrong —
-the first time from a four-document probe that showed beautiful separation and
-proved nothing. They are now derived from the example corpus by
-``scripts/calibrate.py``, and these tests fail if the shipped numbers drift
-away from what that derivation produces, or if the corpus stops being
-separable in the first place.
-
-Without this, the numbers in ``wordllama.py`` would slowly go back to
-being magic.
-"""
+"""Calibration regression tests."""
 
 from __future__ import annotations
 
@@ -31,9 +20,7 @@ from conftest import embedder_or_skip  # noqa: E402
 
 from messie.config import DEFAULT_SETTINGS, Thresholds  # noqa: E402
 
-#: How far the shipped scale may sit from the measured optimum. Wide enough
-#: that a corpus tweak does not fail the build, narrow enough that a real
-#: mistake does.
+#: Permitted drift from the measured optimum.
 SCALE_TOLERANCE = 0.06
 
 @pytest.fixture(scope="module")
@@ -48,9 +35,6 @@ def sweep():
     return sweep_threshold(pairs=60)
 
 
-# --- the corpus has to be separable at all ---------------------------------
-
-
 def test_every_subject_holds_together_above_the_threshold(separation):
     """The weakest subject must still be tighter than the clustering cut-off."""
     embedder = embedder_or_skip()
@@ -59,11 +43,6 @@ def test_every_subject_holds_together_above_the_threshold(separation):
 
 
 def test_subjects_are_further_apart_than_they_are_wide(separation):
-    """Nearly all subject pairs sit below the loosest subject's own cohesion.
-
-    If this inverts, no threshold exists that both holds subjects together and
-    keeps them apart, and every verdict built on clustering becomes a coin toss.
-    """
     assert separation.inter_p95 < separation.intra_min
     assert separation.inter_median < separation.intra_median / 2
 
@@ -83,9 +62,6 @@ def test_the_closest_pair_is_a_known_neighbour(separation):
     assert any(frozenset(p) in hardest for p in plausible)
 
 
-# --- the shipped constants have to match the measurement -------------------
-
-
 def test_shipped_scale_matches_the_measured_optimum(sweep):
     drift = abs(sweep.shipped_scale - sweep.best.scale)
     assert drift <= SCALE_TOLERANCE, (
@@ -95,15 +71,7 @@ def test_shipped_scale_matches_the_measured_optimum(sweep):
 
 
 def test_the_shipped_threshold_performs(sweep):
-    """At the threshold we actually ship, both rates must stay high.
-
-    The floors were 0.90 and 0.80, copied from a comment describing a corpus
-    half this size. The held rate had not met 0.90 for some time and nobody
-    noticed, because the test was asserting a remembered number rather than a
-    measured one. These are set just under what the current corpus produces
-    (76% and 92%), which is what the assertion was always meant to be: a guard
-    against regression, not a target nothing has to hit.
-    """
+    """The shipped threshold must retain useful performance."""
     embedder = embedder_or_skip()
     shipped = Thresholds.derive(embedder.scale, DEFAULT_SETTINGS).cluster
     nearest = min(sweep.points, key=lambda p: abs(p.threshold - shipped))
@@ -131,15 +99,6 @@ def test_default_embedder_declares_a_scale():
     assert 0.05 < embedder.scale < 1.0
 
 
-# --- the ratios that were never swept until now ----------------------------
-#
-# cluster_rel had a derivation; unrelated_rel and misfiled_margin_rel were
-# guesses that had never been measured at all, and one of them was badly wrong.
-# These keep both honest, and — just as importantly — keep the measurement
-# itself honest: each sweep's negative set was at one point empty or nearly so,
-# which produced a clean-looking plateau that was a statement about nothing.
-
-
 @pytest.fixture(scope="module")
 def unrelated_sweep():
     embedder_or_skip()
@@ -147,20 +106,7 @@ def unrelated_sweep():
 
 
 def test_unrelated_rel_sits_above_its_measured_plateau_on_purpose(unrelated_sweep):
-    """The shipped value is knowingly off the sweep's optimum, and stays there.
-
-    This is the one constant where measurement and intent disagree, so the test
-    pins the disagreement rather than either side of it. The sweep scores
-    against package directories, which the README explicitly declines to tune
-    to; moving onto its plateau costs 13 points of recall on genuinely mixed
-    folders and stops the canonical novel-and-tax-returns case reading as a
-    mess at all.
-
-    If the plateau ever rises to meet 0.55 the divergence has resolved itself
-    and this test should go. If someone lowers the constant onto the plateau
-    without also fixing the ground-truth tests that then break, this fails and
-    says why.
-    """
+    """The unrelated-topic setting intentionally exceeds this sweep's plateau."""
     lo, hi = unrelated_sweep.plateau
     shipped = DEFAULT_SETTINGS.unrelated_rel
     assert shipped > hi, (
@@ -171,22 +117,7 @@ def test_unrelated_rel_sits_above_its_measured_plateau_on_purpose(unrelated_swee
 
 
 def test_the_unrelated_sweep_knows_when_it_cannot_conclude(unrelated_sweep):
-    """The thin-sample guard has to be wired up, whichever way it lands here.
-
-    This deliberately does *not* assert a sample size. How many real
-    directories split into two meaningful clusters depends on what happens to
-    be installed on the machine running the tests, and it moves for reasons
-    that have nothing to do with messie: shortening ``text_excerpt_chars`` for
-    speed took it from 34 to 9 on one laptop. A test asserting 20+ would have
-    failed for that, which is not a bug in anything.
-
-    What must hold is that the count and the verdict agree — that a sweep
-    scoring against too few negatives says so instead of recommending a
-    constant off the back of nine coin flips. The first version of this sweep
-    scored against folders that could not fire the signal at any setting and
-    reported a flawless 0% false-alarm rate across the whole range, and nothing
-    in the output hinted that it was measuring nothing at all.
-    """
+    """Sweeps with too few negatives must be marked inconclusive."""
     assert unrelated_sweep.inconclusive == (unrelated_sweep.negatives < MIN_NEGATIVES)
     if unrelated_sweep.inconclusive:
         pytest.skip(
@@ -204,13 +135,7 @@ def test_the_unrelated_sweep_still_trades_off(unrelated_sweep):
 
 
 def test_misfiled_margin_is_still_known_to_be_unmeasurable():
-    """misfiled_margin_rel ships as an unfitted guess on purpose.
-
-    Too few real directories can raise the finding for a false-alarm rate to
-    mean anything, so ``calibrate.py`` declines to recommend a value. If this
-    ever starts passing as conclusive, the constant should finally be fitted —
-    which is a good failure to get.
-    """
+    """The misfiled margin needs more real negatives before fitting."""
     embedder_or_skip()
     report = sweep_misfiled(limit=250)
     assert report.inconclusive, (

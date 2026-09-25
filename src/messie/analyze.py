@@ -60,12 +60,7 @@ def _verdict_for(score: float) -> Verdict:
 def _score_findings(
     findings: list[Finding], settings: Settings = DEFAULT_SETTINGS
 ) -> tuple[float, Verdict]:
-    """Combine signal severities into an overall score and verdict.
-
-    Signals in the same family often describe the same underlying disorder.  Keep
-    the strongest contribution from each family so corroborating detectors do not
-    manufacture confidence by being treated as independent observations.
-    """
+    """Combine the strongest finding in each signal family."""
     families = {
         "unrelated_topics": "topical_disorder",
         "no_common_thread": "topical_disorder",
@@ -277,9 +272,8 @@ def _compose_record(
 ) -> VectorRecord:
     files, texts, names, _kinds, terms = prepared
     dimensions = text_vectors.shape[1]
-    # Keeping the evidence sources in orthogonal subspaces prevents accidental
-    # text-to-name and name-to-kind similarities.  Square-root weights make each
-    # configured weight its share of cosine similarity when all sources exist.
+    # Orthogonal blocks prevent cross-source similarity; square-root weights
+    # preserve each source's configured cosine share.
     vectors = np.zeros((len(files), dimensions * 3), dtype=np.float32)
     topical = np.zeros(len(files), dtype=bool)
 

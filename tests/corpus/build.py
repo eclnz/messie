@@ -1,8 +1,4 @@
-"""Composing example folders out of the corpora.
-
-Every builder is deterministic for a given seed, so a fixture is identical on
-every run and a failing test can be reproduced exactly.
-"""
+"""Build deterministic example folders."""
 
 from __future__ import annotations
 
@@ -29,21 +25,13 @@ def _pick_ext(topic: str, rng: random.Random, kinds: tuple[str, ...] | None) -> 
     return rng.choice(list(choices))
 
 
-#: Words that mark a further document on the same subject. Deliberately none of
-#: them are revision markers ("final", "copy", "revised"), or a folder of
-#: distinct documents would read as a pile of drafts.
+#: Suffixes for distinct documents on the same subject.
 _SUFFIXES = ("part two", "continued", "appendix", "later notes", "addendum",
              "follow up", "second pass", "extra")
 
 
 def _vary(stem: str, text: str, round_number: int) -> tuple[str, str]:
-    """A further file on the same subject, not a photocopy of an earlier one.
-
-    A folder of sixty tax documents holds sixty *different* tax documents. If
-    asking for more files than a topic has entries simply repeated them, the
-    fixture would be full of exact duplicates and would exercise the duplicate
-    detector instead of whatever it was built to test.
-    """
+    """Vary a source document without changing its topic."""
     if round_number == 0:
         return stem, text
 
@@ -94,7 +82,7 @@ def add_topic(
 
 
 def build_coherent(folder: Path, topic: str, count: int = 8, *, seed: int = 0) -> Path:
-    """One subject, one folder. Should read as tidy."""
+    """Build a single-subject folder."""
     add_topic(folder, topic, count, seed=seed)
     return folder
 
@@ -109,12 +97,7 @@ def build_mixed(
 
 
 def build_assorted(folder: Path, count: int = 20, *, seed: int = 0) -> Path:
-    """The hardest case: every file on a different subject, in a different format.
-
-    Nothing in here belongs with anything else, and no two files share a topic,
-    so there is no group for a clustering signal to find. A folder like this is
-    as messy as a folder gets, and saying so cannot rely on finding structure.
-    """
+    """Build a folder with one file from each subject."""
     rng = random.Random(f"assorted:{seed}")
     topics = rng.sample(list(TOPICS), min(count, len(TOPICS)))
     for index, topic in enumerate(topics):
@@ -125,7 +108,7 @@ def build_assorted(folder: Path, count: int = 20, *, seed: int = 0) -> Path:
 
 
 def build_album(folder: Path, count: int = 20, *, seed: int = 0, prefix: str = "DSC") -> Path:
-    """Photographs with opaque names: unreadable, but emphatically not a mess."""
+    """Build an album with opaque image names."""
     rng = random.Random(f"album:{seed}")
     for i in range(count):
         ext = rng.choice(["jpg", "jpg", "jpg", "heic", "png"])
@@ -134,15 +117,12 @@ def build_album(folder: Path, count: int = 20, *, seed: int = 0, prefix: str = "
 
 
 def build_media_library(folder: Path, count: int = 15, *, seed: int = 0) -> Path:
-    """Music or video: one kind of thing, no readable text."""
+    """Build a media library."""
     rng = random.Random(f"media:{seed}")
     for i in range(count):
         ext = rng.choice(["mp3", "mp3", "m4a", "flac"])
         write_file(folder / f"track_{i + 1:02d}_untitled_song.{ext}", "")
     return folder
-
-
-# --- things that clutter a folder without being a subject ------------------
 
 
 def add_debris(folder: Path, *, seed: int = 0) -> list[Path]:
@@ -185,9 +165,6 @@ def add_installers(folder: Path, *, seed: int = 0) -> list[Path]:
     return [write_file(folder / name, name) for name in names]
 
 
-# --- cases the corpus could not express before ------------------------------
-
-
 def add_same_document_in_many_formats(
     folder: Path,
     topic: str,
@@ -195,25 +172,13 @@ def add_same_document_in_many_formats(
     *,
     index: int = 0,
 ) -> list[Path]:
-    """One document, saved five times in five formats.
-
-    Real folders are full of these — the .docx somebody wrote, the .pdf they
-    sent, the .txt somebody pasted. Each extractor returns slightly different
-    text for the same content, so this is the case where duplicate detection
-    has to work across formats or admit that it does not.
-    """
+    """Write one document in several formats."""
     stem, text = TOPICS[topic][index % len(TOPICS[topic])]
     return [write_file(folder / f"{stem}.{ext}", text) for ext in formats]
 
 
 def build_named_album(folder: Path, topic: str, count: int = 12, *, seed: int = 0) -> Path:
-    """Photographs whose filenames actually say something.
-
-    Albums in the fixtures have only ever used opaque names (DSC_0001), which
-    means the filename-only vector path has never been tried against real
-    words. A folder of photos named after what is in them should group by
-    those names.
-    """
+    """Build an album with topical image names."""
     rng = random.Random(f"named-album:{seed}")
     source = TOPICS[topic]
     for i in range(count):
@@ -224,19 +189,13 @@ def build_named_album(folder: Path, topic: str, count: int = 12, *, seed: int = 
 
 
 def add_short_notes(folder: Path, topic: str, count: int = 8, *, seed: int = 0) -> list[Path]:
-    """One-line notes, below the threshold where content outweighs the name.
-
-    Short files take a different path through the vector mix, leaning on the
-    filename instead of the body, and nothing has exercised it with real words.
-    """
+    """Write notes below the topic-evidence length threshold."""
     rng = random.Random(f"short:{seed}")
     source = TOPICS[topic]
     written = []
     for i in range(count):
         stem, text = source[i % len(source)]
-        # Hard cap the length. Splitting on the first full stop looks tidier but
-        # silently does nothing to content without prose sentences — a SQL file
-        # came back 600 characters long, and these are supposed to be one-liners.
+        # Content may not contain sentence punctuation.
         line = " ".join(text.split())[:70].rstrip()
         stem, line = _vary(stem, line, i // len(source))
         ext = rng.choice(["txt", "md"])
@@ -245,12 +204,7 @@ def add_short_notes(folder: Path, topic: str, count: int = 8, *, seed: int = 0) 
 
 
 def build_nested_misfile(root: Path, topic: str, other: str, *, depth: int = 3) -> Path:
-    """A subject filed away several levels down, with loose copies at the top.
-
-    misfiled_neighbours only ever compares a folder against its direct
-    children, so a tree where the matching folder is deeper has never been
-    tried.
-    """
+    """Build a root with loose files matching a deep descendant."""
     deep = root
     for level in range(depth):
         deep = deep / f"level_{level + 1}"

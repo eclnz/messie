@@ -103,12 +103,12 @@ class RatioSweep:
 
     @property
     def inconclusive(self) -> bool:
-        """Whether the sweep has too few negatives."""
+        """Return whether the sweep has too few negatives."""
         return self.negatives < MIN_NEGATIVES
 
 
 def measure_separation(top: int = 6) -> Separation:
-    """Average-link similarity within each subject, and between every pair."""
+    """Measure within- and between-subject similarity."""
     embedder = get_embedder()
     labels, texts = [], []
     for topic, entries in TOPICS.items():
@@ -143,12 +143,7 @@ def measure_separation(top: int = 6) -> Separation:
 
 
 def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep:
-    """Which clustering threshold best tells the corpus subjects apart.
-
-    Two things are traded off. Too low and every subject stays whole but
-    unrelated ones merge; too high and unrelated ones separate but real
-    subjects shatter. The sum of the two rates is maximised at the crossover.
-    """
+    """Find a clustering threshold for the fixture corpus."""
     chosen = sorted(ALL_TOPICS)[:topics] if topics else sorted(ALL_TOPICS)
     if len(chosen) < 4:
         raise ValueError("threshold calibration needs at least four topics")
@@ -190,9 +185,7 @@ def sweep_threshold(*, pairs: int = 90, topics: int = 0, seed: int = 4) -> Sweep
             )
             return [group for group in clustering.groups if len(group) >= floor]
 
-        # A singleton or tiny facet is not a second subject.  Calibrate the
-        # structure consumed by the signals, rather than requiring every leaf
-        # to belong to one mathematically perfect cluster.
+        # Match the meaningful groups consumed by signals.
         held = sum(1 for v in single.values() if len(meaningful_groups(v)) <= 1)
         apart = 0
         for vectors, origin in both.values():
@@ -276,39 +269,7 @@ def _fires(analysis, code: str) -> bool:
 
 
 def sweep_unrelated(*, pairs: int = 60, seed: int = 4, limit: int = 400) -> RatioSweep:
-    """Where two groups stop being one subject and start being two.
-
-    ``unrelated_rel`` is the ceiling on the similarity between two cluster
-    centroids, below which they count as unrelated to each other. It decides
-    whether ``unrelated_topics`` speaks at all.
-
-    Both error modes are real and they pull opposite ways. Set it too high and
-    a single subject the clusterer split into facets reads as two subjects
-    cohabiting, which is the false alarm people mind most. Set it too low and a
-    genuine pair of unrelated subjects is waved through as merely adjacent.
-
-    Positives are two-subject folders from the corpus. Negatives are *real*
-    directories — with a caveat that decides how this report should be read:
-    they are package directories, and the project deliberately does not tune to
-    them (see the README). A large library genuinely does hold several
-    subjects, so a finding on one is not straightforwardly wrong. Treat the
-    false-alarm column as an upper bound on the error rate, measured against
-    the least favourable sample available, rather than as a defect count.
-
-    They are used anyway because the synthetic coherent folders cannot serve.
-    At six to eight files none of the 37 splits into two meaningful clusters,
-    so not one is capable of producing this finding at any ratio, and scoring
-    against them would have reported a spotless 0% across the whole range
-    — a flat line that
-    looks like a wide safe plateau and is really a measurement of nothing. Only
-    a folder that actually got split is at risk, so only those are counted, and
-    ``at_risk`` is reported so a vacuous negative set cannot hide again.
-
-    ``limit`` is deliberately several times the 90 the other sections use. Only
-    about one real directory in twelve splits into two meaningful clusters, and
-    a rate over the handful that come out of 90 folders can only ever read 0%,
-    50% or 100% — precise-looking numbers with no information in them.
-    """
+    """Measure unrelated-topic recall and false alarms."""
     embedder = get_embedder()
     topics = sorted(ALL_TOPICS)
     tmp = Path(tempfile.mkdtemp(prefix="messie-unrelated-"))
@@ -320,8 +281,6 @@ def sweep_unrelated(*, pairs: int = 60, seed: int = 4, limit: int = 400) -> Rati
         contents = read_dir(build_mixed(tmp / "two" / f"{a}__{b}", {a: 6, b: 6}))
         should_fire.append((contents, vectorize(contents.files, embedder=embedder)))
 
-    # Real, coherent directories: one project, one purpose, so any
-    # unrelated_topics finding on one of them is a false alarm.
     should_not = []
     for folder in coherent_folders(limit):
         try:
@@ -366,25 +325,7 @@ def sweep_unrelated(*, pairs: int = 60, seed: int = 4, limit: int = 400) -> Rati
 
 
 def sweep_misfiled(*, depth: int = 3, limit: int = 400) -> RatioSweep:
-    """How much better a subfolder must fit a file before we say so.
-
-    ``misfiled_margin_rel`` is that margin: a loose file is only called
-    misfiled when some subfolder beats the folder it is sitting in by this
-    much. Zero margin flags anything marginally closer to a subfolder, which on
-    real trees once meant a package flagging its own subpackages — the single
-    largest source of false positives this tool has had.
-
-    Positives come from ``build_nested_misfile``, which buries a subject a few
-    levels down and leaves copies of it loose at the top. Negatives are real
-    directories, the only sample where a false positive costs something and
-    nobody arranged the files to suit us.
-
-    A negative counts as *at risk* only if it fires at a margin of zero. A real
-    directory with no subfolder worth comparing against — two in three of them
-    — cannot produce this finding however the margin is set, and averaging it
-    in would report a reassuring 0% that is really a statement about how many
-    flat directories exist on this machine.
-    """
+    """Measure the misfiled-neighbour margin."""
     from corpus.build import build_nested_misfile
 
     embedder = get_embedder()
@@ -419,7 +360,6 @@ def sweep_misfiled(*, depth: int = 3, limit: int = 400) -> RatioSweep:
         if profiles and len(contents.files) >= DEFAULT_SETTINGS.min_files_to_judge:
             candidates.append((contents, profiles, record))
 
-    # Which of them this signal can reach at all, at the most permissive margin.
     permissive_settings = DEFAULT_SETTINGS.with_(misfiled_margin_rel=0.0)
     negatives = [
         case
@@ -468,13 +408,7 @@ def sweep_misfiled(*, depth: int = 3, limit: int = 400) -> RatioSweep:
 
 
 def measure_real_world(limit: int = 90) -> RealWorld:
-    """Judge real directories that were not written for this test.
-
-    A package directory is coherent by construction — one project, one purpose
-    — so a high rate here means the thresholds fit the fixtures rather than the
-    world. This is how ``garbled`` was caught: perfect on synthetic nonsense,
-    wrong on every real file it flagged.
-    """
+    """Measure findings on real directories."""
     from messie.analyze import analyze_dir
 
     judged = messy = 0
@@ -501,9 +435,6 @@ def measure_real_world(limit: int = 90) -> RealWorld:
         by_signal=dict(sorted(by_signal.items(), key=lambda kv: -kv[1])),
         offenders=offenders[:8],
     )
-
-
-# --- printing --------------------------------------------------------------
 
 
 def _print_separation(report: Separation) -> None:

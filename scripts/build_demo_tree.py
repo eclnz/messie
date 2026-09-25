@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Build a realistic home directory to try messie against.
-
-    python scripts/build_demo_tree.py /tmp/demo && messie /tmp/demo --all
-
-Everything written is synthetic and deterministic for a given seed: real files
-of thirty-odd types, on forty-odd subjects, arranged into folders that range
-from genuinely tidy to hopeless. Nothing here is anybody's real data.
-"""
+"""Build a deterministic demo directory."""
 
 from __future__ import annotations
 
@@ -39,7 +32,6 @@ def build(root: Path, seed: int = 0) -> Path:
     dev = list(DEV_TOPICS)
     personal = list(PERSONAL_TOPICS)
 
-    # A drawer: unrelated subjects, several file kinds, and a lot of leftovers.
     downloads = root / "Downloads"
     for topic, years in ((office[0], 0.2), (personal[0], 1.4), (dev[0], 2.6)):
         for path in add_topic(downloads, topic, 4, seed=seed):
@@ -50,23 +42,19 @@ def build(root: Path, seed: int = 0) -> Path:
     add_version_pileup(downloads)
     build_album(downloads, 8, seed=seed, prefix="IMG")
 
-    # Loose paperwork sitting next to the folder it resembles.
     documents = root / "Documents"
     add_topic(documents, personal[1], 5, seed=seed)
     build_coherent(documents / "Taxes", office[0], 6, seed=seed + 1)
     for path in add_topic(documents, office[0], 3, seed=seed + 9):
         age(path, 1500)
 
-    # Folders that are genuinely fine, and must be left alone.
     build_album(root / "Pictures" / "Wedding", 24, seed=seed)
     build_media_library(root / "Music" / "Albums", 16, seed=seed)
     build_coherent(root / "Projects" / "ledger-api", dev[0], 8, seed=seed)
     build_coherent(root / "Work" / "Invoices", office[1], 9, seed=seed)
 
-    # Every file about something different: the hardest case there is.
     build_assorted(root / "Desktop", 18, seed=seed)
 
-    # A big flat pile, of one subject but far too many of it.
     heap = root / "Archive" / "Scans"
     pool = rng.sample(office + personal, 1)
     add_topic(heap, pool[0], 60, seed=seed)

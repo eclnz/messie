@@ -1,8 +1,4 @@
-"""Each signal: it fires when it should, and stays quiet when it should not.
-
-These use the FakeEmbedder so the assertions are about the signal logic, not
-about any particular model's opinion.
-"""
+"""Signal behaviour tests."""
 
 from __future__ import annotations
 
@@ -10,12 +6,13 @@ import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
 from conftest import codes, finding, write_blob, write_text
 
-from messie.analyze import analyze_dir
+from messie.analyze import SignalContext, analyze_dir
 from messie.result import Verdict
 from messie.scan import read_dir
 from messie.signals.temporal import time_strata
@@ -24,9 +21,7 @@ DAY = 86400.0
 
 
 
-#: Bodies have to clear ``min_text_chars``, or the signals that ask whether a
-#: file belongs with anything will rightly decline to judge them: a one-line
-#: note is uninformative rather than unrelated.
+#: Bodies long enough for topic signals to judge.
 _BODY = (
     "This document is about {marker}, number {i} in the series. It concerns "
     "{marker} throughout, discussing {marker} at some length so that there is "
@@ -46,9 +41,6 @@ def topic_files(folder: Path, marker: str, count: int, ext: str = "txt", start: 
 def age(path: Path, days: float):
     stamp = time.time() - days * DAY
     os.utime(path, (stamp, stamp))
-
-
-# --- unrelated topics -------------------------------------------------------
 
 
 def test_unrelated_topics_fires_on_three_subjects(tmp_path, fake_embedder):
@@ -90,9 +82,6 @@ def test_a_tiny_side_group_does_not_count_as_a_topic(tmp_path, fake_embedder):
     assert "unrelated_topics" not in codes(analysis)
 
 
-# --- strays -----------------------------------------------------------------
-
-
 def test_strays_are_reported(tmp_path, fake_embedder):
     folder = tmp_path / "with_strays"
     topic_files(folder, "alpha", 6)
@@ -116,13 +105,8 @@ def test_unreadable_files_are_not_strays(tmp_path, fake_embedder):
     assert analysis.verdict is Verdict.TIDY
 
 
-# --- shape ------------------------------------------------------------------
-
-
 def test_overcrowded_is_silent_unless_asked_for(tmp_path, fake_embedder):
-    """A folder of 120 files on one subject is not a mess, and by default
-    messie says nothing about it. This is the whole argument of the tool: the
-    contents decide, and a count is not a statement about contents."""
+    """Crowding is opt-in."""
     folder = tmp_path / "heap"
     topic_files(folder, "alpha", 120)
     assert "overcrowded" not in codes(analyze_dir(folder, embedder=fake_embedder))
@@ -148,9 +132,6 @@ def test_small_folder_is_not_overcrowded_even_when_asked(tmp_path, fake_embedder
         folder, DEFAULT_SETTINGS.with_(report_crowding=True), embedder=fake_embedder
     )
     assert "overcrowded" not in codes(analysis)
-
-
-# --- leftovers --------------------------------------------------------------
 
 
 def test_debris(tmp_path, fake_embedder):
@@ -201,9 +182,6 @@ def test_distinct_files_are_not_duplicates(tmp_path, fake_embedder):
     assert "duplicates" not in codes(analyze_dir(folder, embedder=fake_embedder))
 
 
-# --- time -------------------------------------------------------------------
-
-
 def test_time_strata(tmp_path, fake_embedder):
     folder = tmp_path / "attic"
     topic_files(folder, "alpha", 4)
@@ -221,9 +199,6 @@ def test_a_long_running_single_subject_is_an_archive_not_a_mess(tmp_path, fake_e
     for i, path in enumerate(sorted(folder.glob("alpha_*"))):
         age(path, i * 400)
     assert "time_strata" not in codes(analyze_dir(folder, embedder=fake_embedder))
-
-
-# --- neighbours -------------------------------------------------------------
 
 
 def test_loose_files_resembling_a_subfolder(tmp_path, fake_embedder):
@@ -289,7 +264,7 @@ def test_related_fragmented_eras_stay_quiet():
     vectors = np.tile(np.array([1.0, 0.0], dtype=np.float32), (6, 1))
     analysis = _strata_context(vectors, [0, 0, 0, 1, 1, 1])
 
-    assert time_strata(analysis) == []
+    assert time_strata(cast(SignalContext, analysis)) == []
 
 
 def test_unrelated_eras_are_reported():
@@ -301,7 +276,7 @@ def test_unrelated_eras_are_reported():
     )
     analysis = _strata_context(vectors, [0, 0, 0, 1, 1, 1])
 
-    assert time_strata(analysis)[0].code == "time_strata"
+    assert time_strata(cast(SignalContext, analysis))[0].code == "time_strata"
 
 
 def test_no_neighbour_finding_when_nothing_matches(tmp_path, fake_embedder):
@@ -309,9 +284,6 @@ def test_no_neighbour_finding_when_nothing_matches(tmp_path, fake_embedder):
     topic_files(folder, "beta", 8)
     topic_files(folder / "Alphas", "alpha", 5)
     assert "misfiled_neighbours" not in codes(analyze_dir(folder, embedder=fake_embedder))
-
-
-# --- guard rails ------------------------------------------------------------
 
 
 def test_too_few_files_is_not_judged(tmp_path, fake_embedder):

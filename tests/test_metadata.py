@@ -1,16 +1,4 @@
-"""What a binary file says about itself.
-
-``binary_description.py`` is the one module that reads bytes it did not put there, and
-the one carrying an optional dependency, so it is tested directly rather than
-only through a verdict. Two properties matter more than any particular phrase:
-
-* a describer that cannot make sense of a file returns ``""`` — a damaged zip,
-  a font truncated mid-table and a zero-byte file must all come back empty
-  rather than raise, because a scan of a real folder will meet all three;
-* the phrase is *words*, not numbers alone. "4032x3024" and "1920x1080" are two
-  terse strings to an embedding and nothing more, which is why the EXIF
-  category words exist and why they are asserted on here.
-"""
+"""Binary description tests."""
 
 from __future__ import annotations
 
@@ -40,11 +28,8 @@ FONT_ROOTS = ("/usr/share/fonts", "/Library/Fonts", "/System/Library/Fonts")
 
 
 def entry_for(path: Path):
-    """The FileEntry a scan would produce for one real file."""
+    """Find a scanned entry by path."""
     return next(f for f in read_dir(path.parent).files if f.path.name == path.name)
-
-
-# --- archives ---------------------------------------------------------------
 
 
 def test_a_zip_is_described_by_its_members(tmp_path):
@@ -58,8 +43,6 @@ def test_a_zip_is_described_by_its_members(tmp_path):
 
 
 def test_two_archives_of_different_things_share_no_words(tmp_path):
-    """The whole point: a zip of holiday photos and a zip of tax papers are
-    plainly different things, and the manifest is what says so."""
     holiday, taxes = tmp_path / "trip.zip", tmp_path / "taxes.zip"
     with zipfile.ZipFile(holiday, "w") as archive:
         archive.writestr("crete/beach_sunset.jpg", b"x")
@@ -82,7 +65,7 @@ def test_a_tar_is_read_the_same_way(tmp_path):
 
 
 def test_a_wheel_is_an_archive_despite_its_extension(tmp_path):
-    """``.whl`` is not a kind messie knows, so the extension is what routes it."""
+    """Unknown extensions can still route archive descriptions."""
     path = tmp_path / "widgets-1.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("widgets/rendering.py", b"x")
@@ -93,8 +76,6 @@ def test_a_wheel_is_an_archive_despite_its_extension(tmp_path):
 
 
 def test_a_bare_gzip_says_nothing(tmp_path):
-    """No member list to read, and the original name is already in the
-    filename. Attempting it would make ``is_tarfile`` decompress the lot."""
     import gzip
 
     path = tmp_path / "database_dump.sql.gz"
@@ -103,12 +84,7 @@ def test_a_bare_gzip_says_nothing(tmp_path):
 
 
 def test_a_damaged_archive_returns_empty(tmp_path):
-    """``is_zipfile`` says yes and opening it then raises.
-
-    A zip's member list lives in the central directory at the *end* of the
-    file, so a half-written download keeps a valid-looking signature and fails
-    only when something tries to read it.
-    """
+    """Damaged archives return nothing."""
     path = tmp_path / "broken.zip"
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("notes.txt", b"hello")
@@ -132,16 +108,8 @@ def test_a_truncated_tar_returns_empty(tmp_path):
     assert _describe_archive(path) == ""
 
 
-# --- fonts ------------------------------------------------------------------
-
-
 def build_font(path: Path, names: dict[int, str], *, truncate: int | None = None) -> Path:
-    """A minimal sfnt carrying a real name table.
-
-    Only the offset table, one table record and the ``name`` table itself —
-    which is all ``_describe_font`` reads. Strings are UTF-16BE under platform
-    3, as Windows-platform records are.
-    """
+    """Build a minimal sfnt name table."""
     records, storage = b"", b""
     for name_id in sorted(names):
         blob = names[name_id].encode("utf-16-be")
@@ -176,14 +144,12 @@ def test_fonts_from_different_families_do_not_look_alike(tmp_path):
 
 @pytest.mark.parametrize("cut", [0, 8, 20, 30, 40])
 def test_a_truncated_font_returns_empty_rather_than_raising(tmp_path, cut):
-    """A font cut off mid-table is the shape of a half-finished download, and
-    a scan meets those. Every prefix must come back empty, not explode."""
+    """Truncated fonts return nothing."""
     path = build_font(tmp_path / "cut.ttf", {1: "Cormorant Garamond"}, truncate=cut)
     assert _describe_font(path) == ""
 
 
 def test_a_font_without_a_name_table_returns_empty(tmp_path):
-    """A well-formed offset table pointing at no ``name`` at all."""
     path = tmp_path / "nameless.ttf"
     path.write_bytes(
         struct.pack(">IHHHH", 0x00010000, 1, 16, 0, 0)
@@ -195,8 +161,7 @@ def test_a_font_without_a_name_table_returns_empty(tmp_path):
 
 
 def test_a_real_system_font_reads():
-    """The synthetic font is one reading of the spec; a shipped font is the
-    other. Skipped where the machine has no fonts installed."""
+    """Read a system font when one is available."""
     fonts = [
         p
         for root in FONT_ROOTS
@@ -212,9 +177,6 @@ def test_a_real_system_font_reads():
         assert len(text) < 300, f"{name} described at length: {text[:80]}"
 
 
-# --- images -----------------------------------------------------------------
-
-
 def test_png_dimensions():
     header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\x0dIHDR" + struct.pack(">II", 1920, 1080)
     assert _png_size(header) == "1920x1080"
@@ -225,8 +187,7 @@ def test_gif_dimensions():
 
 
 def test_jpeg_dimensions_are_found_past_the_leading_segments():
-    """The SOF marker is not at a fixed offset: JFIF and EXIF segments come
-    first, and each has to be stepped over by its own length."""
+    """JPEG frame markers can follow metadata segments."""
     jfif = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00" + b"\x00" * 11
     sof = b"\xff\xc0" + struct.pack(">H", 17) + b"\x08" + struct.pack(">HH", 3024, 4032)
     assert _jpeg_size(b"\xff\xd8" + jfif + sof + b"\x00" * 8) == "4032x3024"
@@ -247,13 +208,6 @@ def test_an_unreadable_image_returns_empty(tmp_path):
     assert _describe_image(path) == ""
 
 
-# --- EXIF categories --------------------------------------------------------
-#
-# ``_image_category`` is a pure function of the tag dictionary, so the words it
-# chooses are tested without needing Pillow. The end-to-end tests below need a
-# real image with real EXIF, so those ask for it.
-
-
 def test_camera_tags_say_photograph():
     words = _image_category(
         {"Make": "NIKON CORPORATION", "Model": "D7000", "DateTimeOriginal": "2019:07:14 11:02:03"}
@@ -271,7 +225,6 @@ def test_screenshot_software_says_screenshot():
 
 
 def test_a_camera_wins_over_software():
-    """Phones write both. What produced the pixels is the camera."""
     tags = {"Make": "Apple", "Model": "iPhone 13", "Software": "16.1 Screenshot-ish"}
     assert _image_category(tags)[0] == "photograph"
 
@@ -298,8 +251,7 @@ def write_image(path: Path, size: tuple[int, int], tags: dict[str, str]) -> Path
 
 
 def test_a_photograph_and_a_scan_describe_themselves_differently(tmp_path):
-    """The case that brought EXIF back: not one camera roll against another,
-    but a folder mixing *kinds* of image."""
+    """Image metadata distinguishes photographs from scans."""
     pytest.importorskip("PIL")
     photo = write_image(
         tmp_path / "DSC_0142.jpg", (4032, 3024), {"Make": "NIKON", "Model": "D7000"}
@@ -320,9 +272,6 @@ def test_dimensions_alone_when_there_is_no_exif(tmp_path):
     assert _describe_image(path) == "800x600"
 
 
-# --- clipping ---------------------------------------------------------------
-
-
 def test_repeated_words_are_said_once():
     assert _phrase(["invoice", "Invoice", "invoice", "2023"]) == "invoice 2023"
 
@@ -338,12 +287,7 @@ def test_a_single_huge_value_is_not_embedded():
 
 
 def test_an_image_description_stays_under_the_judging_floor(tmp_path):
-    """This is what keeps photo albums out of the coherence reckoning.
-
-    ``unattached_files`` only judges files with at least ``min_text_chars`` of
-    text, so as long as an image's description stays below that line, a folder
-    of pictures can never read as a pile of unrelated things.
-    """
+    """Image descriptions must not become topic evidence."""
     pytest.importorskip("PIL")
     from messie.config import DEFAULT_SETTINGS
 
@@ -372,9 +316,6 @@ def test_an_archive_over_the_read_budget_is_not_described(tmp_path):
     assert describe_binary(entry_for(path), settings) == ""
 
 
-# --- dispatch ---------------------------------------------------------------
-
-
 def test_a_zero_byte_file_says_nothing(tmp_path):
     for name in ("empty.zip", "empty.ttf", "empty.png"):
         (tmp_path / name).write_bytes(b"")
@@ -383,8 +324,7 @@ def test_a_zero_byte_file_says_nothing(tmp_path):
 
 
 def test_text_files_are_not_metadata_s_business(tmp_path):
-    """Prose is ``extract_text``'s job. ``describe`` speaks for the files it
-    cannot read, and stays silent about the rest."""
+    """Binary descriptions leave readable text alone."""
     (tmp_path / "notes.txt").write_text("a real document with real words", encoding="utf-8")
     (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4\n")
     for entry in read_dir(tmp_path).files:
@@ -392,7 +332,7 @@ def test_text_files_are_not_metadata_s_business(tmp_path):
 
 
 def test_describe_never_raises_on_a_file_lying_about_its_type(tmp_path):
-    """Extensions are claims, not facts. Every one of these is mislabelled."""
+    """Mislabelled files must not raise."""
     (tmp_path / "actually_text.zip").write_text("hello, not a zip at all", encoding="utf-8")
     (tmp_path / "actually_zip.ttf").write_bytes(b"PK\x03\x04" + b"\x00" * 60)
     (tmp_path / "actually_font.png").write_bytes(b"\x00\x01\x00\x00" + b"\x00" * 60)
