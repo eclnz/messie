@@ -77,13 +77,13 @@ Build a demonstration tree with:
 ```bash
 > uv run python scripts/build_demo_tree.py /tmp/messie-demo
 
-> uv run messie /tmp/messie-demo --all
+> uv run messie /tmp/messie-demo
 88.7    chaotic 39      ../../../../private/tmp/messie-demo/Downloads   unrelated_topics,time_strata,duplicates,debris,version_pileups
 82      chaotic 8       ../../../../private/tmp/messie-demo/Documents   misfiled_neighbours,unrelated_topics,time_strata
 71.8    messy   18      ../../../../private/tmp/messie-demo/Desktop     no_common_thread
 
 # Comprehensive version showing it did indeed check all folders
-uv run messie /tmp/messie-demo --all --ss --sa
+> uv run messie /tmp/messie-demo --ss --sa
 88.7    chaotic 39      ./Downloads     unrelated_topics,time_strata,duplicates,debris,version_pileups
 82      chaotic 8       ./Documents     misfiled_neighbours,unrelated_topics,time_strata
 71.8    messy   18      ./Desktop       no_common_thread
