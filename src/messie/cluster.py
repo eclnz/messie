@@ -82,16 +82,14 @@ def _nearest_neighbour_chain(
         scores = matrix[cluster, candidates]
         best_score = scores.max()
         tied = candidates[scores == best_score]
-        # keys are unique while clusters are active.  The ID fallback keeps
-        # this total and deterministic even for malformed duplicate inputs.
-        return min((int(candidate) for candidate in tied), key=lambda item: (keys[item], item))
+        # Keys are unique while clusters are active, so array indexing keeps
+        # deterministic ties without a Python loop over every candidate.
+        return int(tied[np.argmin(keys[tied])])
 
     while n_active > 1:
         if not chain:
             candidates = np.flatnonzero(active)
-            chain.append(
-                min((int(item) for item in candidates), key=lambda item: (keys[item], item))
-            )
+            chain.append(int(candidates[np.argmin(keys[candidates])]))
 
         neighbour = nearest(chain[-1])
         if len(chain) >= 2 and neighbour == chain[-2]:
