@@ -64,8 +64,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum recursion depth (default: %(default)s)",
     )
     parser.add_argument(
-        "-a", "--all", dest="show_all", action="store_true",
-        help="include judged folders that have no findings",
+        "-a", "--all", dest="analyze_all", action="store_true",
+        help="analyze every non-empty scanned folder",
+    )
+    parser.add_argument(
+        "--st", "--show-tidy", dest="show_tidy", action="store_true",
+        help="include tidy folders in output",
+    )
+    parser.add_argument(
+        "--ss", "--show-skipped", dest="show_skipped", action="store_true",
+        help="include skipped folders in output",
+    )
+    parser.add_argument(
+        "--sa", "--show-all", dest="show_all_output", action="store_true",
+        help="include tidy and skipped folders in output",
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(
@@ -212,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         max_depth=max(0, args.depth),
         include_hidden=args.hidden,
         report_crowding=args.crowding,
+        min_files_to_judge=1 if args.analyze_all else DEFAULT_SETTINGS.min_files_to_judge,
     )
     if args.threshold is not None:
         settings = settings.with_(cluster_threshold_override=args.threshold)
@@ -247,7 +260,8 @@ def main(argv: list[str] | None = None) -> int:
                 RenderOptions(
                     root=root,
                     colour=colour,
-                    show_all=args.show_all,
+                    show_tidy=args.show_tidy or args.show_all_output,
+                    show_skipped=args.show_skipped or args.show_all_output,
                     min_verdict=min_verdict,
                 ),
             )

@@ -34,7 +34,8 @@ class RenderOptions:
     root: Path
     colour: bool = True
     verbose: bool = False
-    show_all: bool = False
+    show_tidy: bool = False
+    show_skipped: bool = False
     min_verdict: Verdict = Verdict.LIVED_IN
 
 
@@ -76,7 +77,18 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
     ``xargs``.
     """
     if not analysis.judged:
-        return []
+        reason = analysis.skip_reason.value if analysis.skip_reason else "unknown"
+        return [
+            "\t".join(
+                (
+                    "-",
+                    "skipped",
+                    str(analysis.n_files),
+                    _display_path(analysis.path, opts.root),
+                    reason,
+                )
+            )
+        ]
 
     verdict = _paint(
         _VERDICT_LABELS[analysis.verdict],
@@ -107,24 +119,37 @@ def render_text(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
 
 
 def visible_analyses(
-    analyses: list[DirAnalysis], opts: RenderOptions
+    analyses: list[DirAnalysis],
+    opts: RenderOptions,
 ) -> list[DirAnalysis]:
-    """Select findings by default and all judged folders only on request."""
-    judged = [analysis for analysis in analyses if analysis.judged]
-    if opts.show_all:
-        return judged
-    return [
-        analysis
-        for analysis in judged
-        if analysis.findings and analysis.verdict >= opts.min_verdict
-    ]
+    """Select findings, plus independently requested tidy or skipped folders."""
+    selected: list[DirAnalysis] = []
+    for analysis in analyses:
+        if not analysis.judged:
+            if opts.show_skipped:
+                selected.append(analysis)
+            continue
+        if analysis.verdict is Verdict.TIDY:
+            if opts.show_tidy:
+                selected.append(analysis)
+            continue
+        if analysis.findings and analysis.verdict >= opts.min_verdict:
+            selected.append(analysis)
+    return selected
 
 
 def to_dict(analysis: DirAnalysis) -> dict:
+    if not analysis.judged:
+        return {
+            "path": str(analysis.path),
+            "files": analysis.n_files,
+            "skip_reason": (
+                analysis.skip_reason.value if analysis.skip_reason else "unknown"
+            ),
+        }
+
     return {
         "path": str(analysis.path),
-        "judged": analysis.judged,
-        "skip_reason": analysis.skip_reason.value if analysis.skip_reason else None,
         "files": analysis.n_files,
         "truncated": analysis.truncated,
         "score": analysis.score,

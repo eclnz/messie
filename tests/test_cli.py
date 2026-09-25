@@ -46,6 +46,7 @@ def test_json_output_is_valid_and_complete(messy_tree, capsys):
     assert payload["root"] == str(messy_tree.resolve())
     folder = payload["folders"][0]
     assert "embedder" not in folder
+    assert "judged" not in folder
     assert folder["verdict"] in {"tidy", "lived-in", "messy", "chaotic"}
     assert 0 <= folder["score"] <= 100
     assert any(f["code"] == "unrelated_topics" for f in folder["findings"])
@@ -79,20 +80,24 @@ def test_cli_changes_nothing_on_disk(messy_tree, capsys):
     assert snapshot(messy_tree) == before
 
 
-def test_all_flag_shows_tidy_folders(tmp_path, capsys):
+def test_show_tidy_flag_shows_tidy_folders(tmp_path, capsys):
     folder = tmp_path / "album"
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
-    _, out = run([str(folder), "--all", "--no-color"], capsys)
+    _, out = run([str(folder), "--show-tidy", "--no-color"], capsys)
     assert "\ttidy\t" in out
 
 
-def test_short_depth_and_all_flags(tmp_path, capsys):
-    folder = tmp_path / "album"
-    for i in range(12):
-        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
-    _, out = run(["-a", "-d", "0", str(folder), "--no-color"], capsys)
-    assert "\ttidy\t" in out
+def test_all_analyzes_a_folder_that_would_otherwise_be_skipped(tmp_path, capsys):
+    (tmp_path / "only.txt").write_text("one small note")
+
+    _, out = run([str(tmp_path), "--json", "--ss"], capsys)
+    assert json.loads(out)["folders"][0]["skip_reason"] == "too_few_files"
+
+    _, out = run(["-a", "-d", "0", "--st", str(tmp_path), "--json"], capsys)
+    analyzed = json.loads(out)["folders"][0]
+    assert analyzed["verdict"] == "tidy"
+    assert "skip_reason" not in analyzed
 
 
 def test_quoted_glob_expands_to_multiple_roots(tmp_path, capsys):
@@ -101,7 +106,7 @@ def test_quoted_glob_expands_to_multiple_roots(tmp_path, capsys):
         for i in range(6):
             write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
 
-    code, out = run([str(tmp_path / "*"), "-a", "--json"], capsys)
+    code, out = run([str(tmp_path / "*"), "--st", "--json"], capsys)
     payload = json.loads(out)
 
     assert code == 0
@@ -112,7 +117,7 @@ def test_file_glob_analyzes_its_containing_folder(tmp_path, capsys):
     for i in range(6):
         (tmp_path / f"note-{i}.txt").write_text("one coherent subject " * 20)
 
-    _, out = run([str(tmp_path / "*.txt"), "-a", "--json"], capsys)
+    _, out = run([str(tmp_path / "*.txt"), "--st", "--json"], capsys)
     payload = json.loads(out)
 
     assert payload["root"] == str(tmp_path.resolve())
@@ -124,7 +129,7 @@ def test_dash_reads_newline_delimited_paths(tmp_path, capsys, monkeypatch):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     monkeypatch.setattr("sys.stdin", io.StringIO(f"{folder}\n"))
 
-    _, out = run(["-", "-a", "--json"], capsys)
+    _, out = run(["-", "--st", "--json"], capsys)
 
     assert json.loads(out)["root"] == str(folder.resolve())
 
@@ -138,13 +143,14 @@ def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
             write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     monkeypatch.setattr("sys.stdin", io.StringIO("\0".join(map(str, roots)) + "\0"))
 
-    code, out = run(["-0", "-", "-a", "--jsonl"], capsys)
+    code, out = run(["-0", "-", "--st", "--jsonl"], capsys)
     records = [json.loads(line) for line in out.splitlines()]
 
     assert code == 0
     assert {Path(record["root"]).name for record in records} == {"one", "two"}
     assert all("path" in record and "verdict" in record for record in records)
     assert all("embedder" not in record for record in records)
+    assert all("judged" not in record for record in records)
 
 
 def test_quiet_mode_uses_only_exit_status(messy_tree, capsys):
@@ -153,13 +159,44 @@ def test_quiet_mode_uses_only_exit_status(messy_tree, capsys):
     assert out == ""
 
 
-def test_json_omits_unjudged_folders_without_all(tmp_path, capsys):
+def test_json_omits_skipped_folders_unless_requested(tmp_path, capsys):
     (tmp_path / "only.txt").write_text("too small")
     _, out = run([str(tmp_path), "--json"], capsys)
     assert json.loads(out)["folders"] == []
 
+    _, out = run([str(tmp_path), "--json", "--show-tidy"], capsys)
+    assert json.loads(out)["folders"] == []
 
-def test_json_hides_empty_findings_unless_all(tmp_path, capsys):
+    _, out = run([str(tmp_path), "--json", "--show-skipped"], capsys)
+    skipped = json.loads(out)["folders"]
+    assert skipped == [
+        {
+            "path": str(tmp_path),
+            "files": 1,
+            "skip_reason": "too_few_files",
+        }
+    ]
+
+    _, out = run([str(tmp_path), "--json", "--show-all"], capsys)
+    assert json.loads(out)["folders"] == skipped
+
+
+def test_json_lines_can_show_skipped_folders(tmp_path, capsys):
+    (tmp_path / "only.txt").write_text("too small")
+
+    _, out = run([str(tmp_path), "--jsonl"], capsys)
+    assert out == ""
+
+    _, out = run([str(tmp_path), "--jsonl", "--show-skipped"], capsys)
+    skipped = json.loads(out)
+    assert skipped["root"] == str(tmp_path)
+    assert skipped["path"] == str(tmp_path)
+    assert skipped["files"] == 1
+    assert skipped["skip_reason"] == "too_few_files"
+    assert "judged" not in skipped
+
+
+def test_json_hides_tidy_folders_unless_requested(tmp_path, capsys):
     folder = tmp_path / "album"
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
@@ -167,13 +204,16 @@ def test_json_hides_empty_findings_unless_all(tmp_path, capsys):
     _, out = run([str(folder), "--json", "--min-verdict", "tidy"], capsys)
     assert json.loads(out)["folders"] == []
 
-    _, out = run([str(folder), "--json", "--all"], capsys)
+    _, out = run([str(folder), "--json", "--show-skipped"], capsys)
+    assert json.loads(out)["folders"] == []
+
+    _, out = run([str(folder), "--json", "--show-tidy"], capsys)
     included = json.loads(out)["folders"]
     assert len(included) == 1
     assert included[0]["findings"] == []
 
 
-def test_json_lines_hides_empty_findings_unless_all(tmp_path, capsys):
+def test_json_lines_hides_tidy_folders_unless_requested(tmp_path, capsys):
     folder = tmp_path / "album"
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
@@ -181,16 +221,16 @@ def test_json_lines_hides_empty_findings_unless_all(tmp_path, capsys):
     _, out = run([str(folder), "--jsonl", "--min-verdict", "tidy"], capsys)
     assert out == ""
 
-    _, out = run([str(folder), "--jsonl", "--all"], capsys)
+    _, out = run([str(folder), "--jsonl", "--show-all"], capsys)
     assert json.loads(out)["findings"] == []
 
 
-def test_all_handles_multiple_tidy_folders(tmp_path, capsys):
+def test_show_all_handles_multiple_tidy_folders(tmp_path, capsys):
     for parent in (tmp_path, tmp_path / "child"):
         for i in range(6):
             write_blob(parent / f"DSC_{i:03d}.jpg", 4000 + i)
 
-    code, out = run([str(tmp_path), "-a", "--no-color"], capsys)
+    code, out = run([str(tmp_path), "--sa", "--no-color"], capsys)
 
     assert code == 0
     lines = out.splitlines()
@@ -204,7 +244,7 @@ def test_text_output_is_unix_friendly_tsv(tmp_path, capsys, monkeypatch):
     for i in range(12):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
 
-    _, out = run([str(folder), "-a"], capsys)
+    _, out = run([str(folder), "--st"], capsys)
 
     assert "\033[" not in out
     assert "nothing out of place" not in out
