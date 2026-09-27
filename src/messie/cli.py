@@ -96,6 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-c", "--crowding", action="store_true",
         help="report folders holding many files even when they belong together",
     )
+    parser.add_argument(
+        "-f", "--folder", action="store_true",
+        help="look for coherent folders whose contents fit another location better",
+    )
     chatter = parser.add_mutually_exclusive_group()
     chatter.add_argument(
         "-q", "--quiet", action="store_true",
@@ -224,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         max_depth=max(0, args.depth),
         include_hidden=args.hidden,
         report_crowding=args.crowding,
+        report_folder_placement=args.folder,
         min_files_to_judge=1 if args.analyze_all else DEFAULT_SETTINGS.min_files_to_judge,
     )
     if args.threshold is not None:

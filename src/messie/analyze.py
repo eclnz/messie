@@ -20,6 +20,7 @@ from messie.embed import Embedder, get_embedder, normalise
 from messie.extract import extract_text
 from messie.kinds import Kind, is_textual, kind_phrase
 from messie.label import file_terms, format_label, label_clusters
+from messie.placement import folder_placement_findings
 from messie.result import DirAnalysis, Finding, SkipReason, Verdict
 from messie.scan import DirContents, FileEntry, read_dir, walk
 from messie.signals import run_all
@@ -464,6 +465,8 @@ def _vectorized_profiles(
     embedder: Embedder,
     report: ProgressFn,
     cache: EvidenceCache,
+    *,
+    include_small: bool = False,
 ) -> tuple[dict[Path, VectorRecord], dict[Path, np.ndarray]]:
     """Vectorise each meaningful folder once and derive its profile."""
     records: dict[Path, VectorRecord] = {}
@@ -472,7 +475,9 @@ def _vectorized_profiles(
     prepared: list[PreparedRecord] = []
     for done, folder in enumerate(contents, start=1):
         report(Progress("read", done, len(contents), folder.path, len(folder.files)))
-        if len(folder.files) < settings.meaningful_cluster_min:
+        if not folder.files or (
+            not include_small and len(folder.files) < settings.meaningful_cluster_min
+        ):
             continue
         paths.append(folder.path.resolve())
         prepared.append(_prepare(folder.files, settings=settings, cache=cache))
@@ -481,7 +486,8 @@ def _vectorized_profiles(
     )
     for path, record in zip(paths, vectorized, strict=True):
         records[path] = record
-        profiles[path] = profile_of(records[path].vectors)
+        if len(record.vectors) >= settings.meaningful_cluster_min:
+            profiles[path] = profile_of(record.vectors)
     return records, profiles
 
 
@@ -536,8 +542,11 @@ def analyze_tree(
     contents = walk(root, settings)
     report(Progress("scan", len(contents), len(contents), root))
     with EvidenceCache(settings) as cache:
-        records, profiles = _vectorized_profiles(contents, settings, embedder, report, cache)
-        return _judge_tree(
+        records, profiles = _vectorized_profiles(
+            contents, settings, embedder, report, cache,
+            include_small=settings.report_folder_placement,
+        )
+        results = _judge_tree(
             contents,
             settings,
             embedder,
@@ -545,3 +554,36 @@ def analyze_tree(
             _profiles_by_ancestor(contents, profiles),
             report,
         )
+        if settings.report_folder_placement:
+            thresholds = Thresholds.derive(
+                embedder.scale, settings, settings.cluster_threshold_override
+            )
+            names = [
+                " ".join(name_tokens(file.stem, drop_noise=False))
+                for folder in contents for file in folder.files
+            ]
+            encoded_names = _encode_unique(names, embedder, cache)
+            name_vectors = {
+                file.path: vector
+                for file, vector in zip(
+                    (file for folder in contents for file in folder.files),
+                    encoded_names,
+                    strict=True,
+                )
+            }
+            placements = folder_placement_findings(
+                contents, records, name_vectors, thresholds.cluster,
+                progress=lambda done, total, path: report(
+                    Progress("place", done, total, path)
+                ),
+            )
+            for analysis in results:
+                finding = placements.get(analysis.path.resolve())
+                if finding is None:
+                    continue
+                analysis.judged = True
+                analysis.skip_reason = None
+                analysis.findings.append(finding)
+                analysis.score, analysis.verdict = _score_findings(analysis.findings, settings)
+            results.sort(key=lambda analysis: (-analysis.score, str(analysis.path)))
+        return results

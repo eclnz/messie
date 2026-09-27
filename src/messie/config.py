@@ -47,6 +47,7 @@ class Settings:
     near_duplicate_sim: float = 0.97
 
     report_crowding: bool = False
+    report_folder_placement: bool = False
     overcrowded_soft_limit: int = 40
     time_strata_gap_days: float = 365.0
 
@@ -56,6 +57,7 @@ class Settings:
             "no_common_thread": 0.85,
             "strays": 0.85,
             "misfiled_neighbours": 0.60,
+            "folder_placement": 0.65,
             "time_strata": 0.40,
             "overcrowded": 0.40,
             "debris": 0.35,

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from messie.analyze import Progress
-from messie.result import DirAnalysis, Verdict
+from messie.result import DirAnalysis, FindingData, Verdict
 
 _COLOURS = {
     Verdict.TIDY: "\033[32m",
@@ -161,7 +161,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
                 "headline": f.headline,
                 "detail": f.detail,
                 "examples": f.examples,
-                "data": f.data,
+                "data": f.data.to_dict() if isinstance(f.data, FindingData) else f.data,
             }
             for f in analysis.findings
         ],
@@ -199,6 +199,7 @@ class ProgressPrinter:
         "scan": "scanning",
         "read": "reading",
         "judge": "judging",
+        "place": "placing",
     }
 
     def __init__(self, stream=None, colour: bool | None = None, width: int = 78) -> None:
@@ -233,7 +234,7 @@ class ProgressPrinter:
         )
         if self._live:
             self._stream.write("\r" + _fit(_paint(line, _DIM, self._colour), self._width))
-            if last and progress.stage == "judge":
+            if last and progress.stage in {"judge", "place"}:
                 self._stream.write("\r" + " " * self._width + "\r")
         elif changed or last:
             self._stream.write(line.rstrip() + "\n")
