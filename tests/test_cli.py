@@ -433,3 +433,16 @@ def test_negative_numbers_reach_their_validators(tmp_path, capsys):
     with pytest.raises(SystemExit):
         main([str(tmp_path), "--depth", "-1"])
     assert "must be 0 or more" in capsys.readouterr().err
+
+
+def test_standard_input_is_read_only_when_asked_for(tmp_path, capsys, monkeypatch):
+    class Unread(io.StringIO):
+        def read(self, *args):
+            raise AssertionError("messie read standard input without '-'")
+
+    monkeypatch.setattr("sys.stdin", Unread())
+    monkeypatch.setattr("sys.argv", ["messie"])
+    monkeypatch.chdir(tmp_path)
+
+    assert main() == 0
+    capsys.readouterr()

@@ -154,15 +154,13 @@ def _read_stdin(null: bool) -> list[str]:
     return [chunk.rstrip("\r") for chunk in chunks if chunk]
 
 
-def _path_operands(paths: list[str], *, null: bool, implicit_stdin: bool) -> list[str]:
+def _path_operands(paths: list[str], *, null: bool) -> list[str]:
+    """Expand '-' into paths read from standard input; default to '.'.
+
+    Standard input is read only when asked for, so messie never swallows
+    input meant for something else, such as the loop in ``while read``.
+    """
     if not paths:
-        if implicit_stdin and not getattr(sys.stdin, "isatty", lambda: True)():
-            try:
-                piped = _read_stdin(null)
-                if piped:
-                    return piped
-            except OSError:
-                pass
         return ["."]
 
     operands: list[str] = []
@@ -234,7 +232,6 @@ def _write_stdout(output: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    implicit_stdin = argv is None
     args = build_parser().parse_args(argv)
 
     try:
@@ -245,9 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        operands = _path_operands(
-            args.paths, null=args.null, implicit_stdin=implicit_stdin
-        )
+        operands = _path_operands(args.paths, null=args.null)
     except OSError as exc:
         print(f"messie: standard input: {exc}", file=sys.stderr)
         return 2
