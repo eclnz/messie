@@ -173,7 +173,7 @@ def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
             write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     monkeypatch.setattr("sys.stdin", io.StringIO("\0".join(map(str, roots)) + "\0"))
 
-    code, out = run(["-0", "-", "--st", "--jsonl"], capsys)
+    code, out = run(["-z", "-", "--st", "--jsonl"], capsys)
     records = [json.loads(line) for line in out.splitlines()]
 
     assert code == 0
@@ -419,3 +419,17 @@ def test_folders_that_fail_the_run_are_always_shown(messy_tree, capsys):
 
     assert code == 1
     assert out.strip(), "a failing exit status must name the folder that caused it"
+
+
+@pytest.mark.parametrize("value", ["5", "0", "1", "-0.2"])
+def test_threshold_outside_zero_to_one_is_a_usage_error(tmp_path, capsys, value):
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path), "--threshold", value])
+    assert exc.value.code == 2
+    assert "between 0 and 1" in capsys.readouterr().err
+
+
+def test_negative_numbers_reach_their_validators(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        main([str(tmp_path), "--depth", "-1"])
+    assert "must be 0 or more" in capsys.readouterr().err

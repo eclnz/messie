@@ -38,6 +38,15 @@ def _depth(text: str) -> int:
     return value
 
 
+def _threshold(text: str) -> float:
+    value = float(text)
+    if not 0 < value < 1:
+        raise argparse.ArgumentTypeError(
+            f"must be a similarity between 0 and 1, not {text}"
+        )
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="messie",
@@ -89,8 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(
-        "-t", "--threshold", type=float, default=None,
-        help="similarity below which two files count as unrelated",
+        "-t", "--threshold", type=_threshold, default=None,
+        help=(
+            "similarity, between 0 and 1, below which two files count as "
+            "unrelated (default: set by the embedding model)"
+        ),
     )
     parser.add_argument(
         "-m", "--min-verdict", default="lived-in",
@@ -113,8 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true",
         help="show progress on standard error",
     )
+    # Not -0: an option that looks like a number stops argparse accepting
+    # negative values anywhere else on the command line.
     parser.add_argument(
-        "-0", "--null", action="store_true",
+        "-z", "--null", action="store_true",
         help="split standard-input paths on NUL bytes instead of newlines",
     )
     parser.add_argument(
