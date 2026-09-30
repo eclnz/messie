@@ -2,10 +2,7 @@
 
 A linter for folder structure. Fails your CI when a folder turns into a mess.
 
-messie reads the files, groups them by subject, and scores each folder 0–100
-for mixed topics, misfiled files, duplicates, and debris. Scores are
-deterministic, so a failure means the files changed, not that the run was
-unlucky. Local only, read only.
+messie reads the files, groups them by subject, and scores each folder 0–100 for mixed topics, misfiled files, duplicates, and debris. Scores are deterministic, so a failure means the files changed, not that the run was unlucky. Local only, read only.
 
 ```yaml
 - uses: actions/checkout@v5
@@ -28,8 +25,7 @@ $ messie ~/demo
 uv tool install git+https://github.com/eclnz/messie.git
 ```
 
-The embedding model ([wordllama](https://pypi.org/project/wordllama/)) ships
-with the package. PDF text needs the `pdf` extra.
+The embedding model ([wordllama](https://pypi.org/project/wordllama/)) ships with the package. PDF text needs the `pdf` extra.
 
 ## Use
 
@@ -90,13 +86,9 @@ messie ~ | cut -f4 | xargs -n1 ls
 | duplicates | identical bytes or text |
 | time_strata | unrelated material from separate periods |
 
-tidy 0–24, lived-in 25–49, messy 50–74, chaotic 75–100. Folders with fewer
-than six files are skipped unless `--all`.
+tidy 0–24, lived-in 25–49, messy 50–74, chaotic 75–100. Folders with fewer than six files are skipped unless `--all`.
 
-Reads text, office formats, HTML, CSV, source, and subtitles; PDF optional.
-Other files are judged by name, kind, and metadata. No OCR. Embeddings are
-strongest on English; tune with `--threshold`. Hidden files and `.git`,
-`node_modules`, `.venv`, `dist`, etc. are skipped.
+Reads text, office formats, HTML, CSV, source, and subtitles; PDF optional. Other files are judged by name, kind, and metadata. No OCR. Embeddings are strongest on English; tune with `--threshold`. Hidden files and `.git`, `node_modules`, `.venv`, `dist`, etc. are skipped.
 
 ## Development
 
