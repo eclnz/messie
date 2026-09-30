@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import json
 import os
 import sys
 from pathlib import Path
@@ -278,12 +277,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.quiet:
         if args.json:
-            payloads = [json.loads(render_json(items, opts)) for _, items, opts in completed]
-            output = (
-                json.dumps(payloads[0], indent=2, default=str)
-                if len(payloads) == 1
-                else json.dumps({"roots": payloads}, indent=2, default=str)
-            )
+            output = render_json([(items, opts) for _, items, opts in completed])
         elif args.jsonl:
             output = "\n".join(
                 rendered

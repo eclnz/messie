@@ -56,16 +56,17 @@ def _fit(text: str, width: int) -> str:
     return text.ljust(width)
 
 
-def _display_path(path: Path, root: Path) -> str:
-    """Return a path that another command can use from the current directory."""
-    del root  # Paths are records now, so they must not depend on a scan root.
+def display_path(path: Path) -> str:
+    """The path as every output format writes it.
+
+    Paths under the working directory are relative (``./docs/x``), so records
+    from CI name repository paths; anything else stays absolute.
+    """
     try:
-        relative = os.path.relpath(path, Path.cwd())
+        relative = Path(path).relative_to(Path.cwd())
     except (OSError, ValueError):
         return str(path)
-    if relative == "." or relative.startswith("../"):
-        return relative
-    return "./" + relative
+    return "." if relative == Path(".") else f"./{relative}"
 
 
 def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
@@ -84,7 +85,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
                     "-",
                     "skipped",
                     str(analysis.n_files),
-                    _display_path(analysis.path, opts.root),
+                    display_path(analysis.path),
                     reason,
                 )
             )
@@ -102,7 +103,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
                 f"{analysis.score:g}",
                 verdict,
                 str(analysis.n_files),
-                _display_path(analysis.path, opts.root),
+                display_path(analysis.path),
                 codes,
             )
         )
@@ -141,7 +142,7 @@ def visible_analyses(
 def to_dict(analysis: DirAnalysis) -> dict:
     if not analysis.judged:
         return {
-            "path": str(analysis.path),
+            "path": display_path(analysis.path),
             "files": analysis.n_files,
             "skip_reason": (
                 analysis.skip_reason.value if analysis.skip_reason else "unknown"
@@ -149,7 +150,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
         }
 
     payload = {
-        "path": str(analysis.path),
+        "path": display_path(analysis.path),
         "files": analysis.n_files,
         "score": analysis.score,
         "verdict": _VERDICT_LABELS[analysis.verdict],
@@ -173,18 +174,25 @@ def to_dict(analysis: DirAnalysis) -> dict:
     return payload
 
 
-def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
+def render_json(results: list[tuple[list[DirAnalysis], RenderOptions]]) -> str:
+    """One JSON document with a record per root, however many roots there are."""
     payload = {
-        "root": str(opts.root),
-        "folders": [to_dict(a) for a in visible_analyses(analyses, opts)],
+        "roots": [
+            {
+                "root": display_path(opts.root),
+                "folders": [to_dict(a) for a in visible_analyses(analyses, opts)],
+            }
+            for analyses, opts in results
+        ]
     }
     return json.dumps(payload, indent=2, default=str)
 
 
 def render_json_lines(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
     """One compact JSON object per selected folder."""
+    root = display_path(opts.root)
     return "\n".join(
-        json.dumps({"root": str(opts.root), **to_dict(analysis)}, default=str)
+        json.dumps({"root": root, **to_dict(analysis)}, default=str)
         for analysis in visible_analyses(analyses, opts)
     )
 
