@@ -32,6 +32,13 @@ def _parse_verdict(text: str) -> Verdict:
         raise ValueError(f"unknown verdict {text!r}") from exc
 
 
+def _depth(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {value}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="messie",
@@ -59,9 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="write one compact JSON object per folder",
     )
     parser.add_argument(
-        "-d", "--depth", "--max-depth", type=int,
-        default=DEFAULT_SETTINGS.max_depth,
-        help="maximum recursion depth (default: %(default)s)",
+        "-d", "--depth", "--max-depth", type=_depth, default=None,
+        help=(
+            "deepest folder level to judge and report; deeper folders are "
+            "still read as evidence (default: no limit)"
+        ),
     )
     parser.add_argument(
         "-a", "--all", dest="analyze_all", action="store_true",
@@ -221,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not operands and not operand_errors else 2
 
     settings = DEFAULT_SETTINGS.with_(
-        max_depth=max(0, args.depth),
+        max_depth=args.depth,
         include_hidden=args.hidden,
         report_crowding=args.crowding,
         min_files_to_judge=1 if args.analyze_all else DEFAULT_SETTINGS.min_files_to_judge,

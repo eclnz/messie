@@ -424,7 +424,7 @@ def _descendant_profiles(
 ) -> dict[Path, np.ndarray]:
     """Profiles of meaningful folders below ``root`` for misfiling checks."""
     profiles: dict[Path, np.ndarray] = {}
-    for contents in walk(root, settings):
+    for contents in walk(root, settings.with_(max_depth=None)):
         path = contents.path.resolve()
         if path == root or len(contents.files) < settings.meaningful_cluster_min:
             continue
@@ -529,16 +529,25 @@ def analyze_tree(
     embedder: Embedder | None = None,
     progress: ProgressFn | None = None,
 ) -> list[DirAnalysis]:
-    """Judge every folder at or under ``root``, worst first."""
+    """Judge every folder at or under ``root`` within ``max_depth``, worst first.
+
+    The whole tree is read regardless of ``max_depth`` so a folder's score
+    depends only on its own subtree, never on how deep the caller looked.
+    """
     embedder = embedder or get_embedder()
     report: ProgressFn = progress or (lambda _: None)
     root = Path(root).expanduser().resolve()
-    contents = walk(root, settings)
+    contents = walk(root, settings.with_(max_depth=None))
     report(Progress("scan", len(contents), len(contents), root))
+    judged = [
+        folder
+        for folder in contents
+        if settings.max_depth is None or folder.depth <= settings.max_depth
+    ]
     with EvidenceCache(settings) as cache:
         records, profiles = _vectorized_profiles(contents, settings, embedder, report, cache)
         return _judge_tree(
-            contents,
+            judged,
             settings,
             embedder,
             records,

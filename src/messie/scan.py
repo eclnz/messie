@@ -38,6 +38,8 @@ class DirContents:
     subdirs: list[Path] = field(default_factory=list)
     #: Files omitted because the folder exceeded ``max_files_per_dir``.
     truncated: int = 0
+    #: Levels below the walk's root.
+    depth: int = 0
 
     def __len__(self) -> int:
         return len(self.files)
@@ -118,7 +120,8 @@ def walk(root: Path, settings: Settings = DEFAULT_SETTINGS) -> list[DirContents]
         seen.add(real)
 
         contents = read_dir(path, settings)
+        contents.depth = depth
         out.append(contents)
-        if depth < settings.max_depth:
+        if settings.max_depth is None or depth < settings.max_depth:
             queue.extend((sub, depth + 1) for sub in contents.subdirs)
     return out
