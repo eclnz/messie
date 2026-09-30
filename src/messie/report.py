@@ -37,6 +37,8 @@ class RenderOptions:
     show_tidy: bool = False
     show_skipped: bool = False
     min_verdict: Verdict = Verdict.LIVED_IN
+    #: Folders at or above this verdict fail the run, so they are always shown.
+    fail_over: Verdict | None = None
 
 
 def supports_colour(stream=sys.stdout) -> bool:
@@ -123,12 +125,19 @@ def visible_analyses(
     analyses: list[DirAnalysis],
     opts: RenderOptions,
 ) -> list[DirAnalysis]:
-    """Select findings, plus independently requested tidy or skipped folders."""
+    """Select findings, plus independently requested tidy or skipped folders.
+
+    A folder that fails the run is always selected, so a failing exit status
+    never arrives without the folders that caused it.
+    """
     selected: list[DirAnalysis] = []
     for analysis in analyses:
         if not analysis.judged:
             if opts.show_skipped:
                 selected.append(analysis)
+            continue
+        if opts.fail_over is not None and analysis.verdict >= opts.fail_over:
+            selected.append(analysis)
             continue
         if analysis.verdict is Verdict.TIDY:
             if opts.show_tidy:

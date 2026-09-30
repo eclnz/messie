@@ -411,3 +411,11 @@ def test_nested_roots_report_each_folder_once(tmp_path, capsys):
         _, out = run([*argv, "--st"], capsys)
         paths = [line.split("\t")[3] for line in out.splitlines()]
         assert sorted(paths) == sorted({str(tmp_path), child}), argv
+
+
+def test_folders_that_fail_the_run_are_always_shown(messy_tree, capsys):
+    argv = [str(messy_tree), "--min-verdict", "chaotic", "--fail-over", "lived-in"]
+    code, out = run(argv, capsys)
+
+    assert code == 1
+    assert out.strip(), "a failing exit status must name the folder that caused it"

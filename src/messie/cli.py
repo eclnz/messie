@@ -290,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
                     show_tidy=args.show_tidy or args.show_all_output,
                     show_skipped=args.show_skipped or args.show_all_output,
                     min_verdict=min_verdict,
+                    fail_over=fail_over,
                 ),
             )
         )
