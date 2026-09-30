@@ -8,8 +8,9 @@ deterministic, so a failure means the files changed, not that the run was
 unlucky. Local only, read only.
 
 ```yaml
-- run: uv tool install git+https://github.com/eclnz/messie.git
-- run: messie docs --fail-over messy   # exit 1 if any folder scores 50+
+- uses: actions/checkout@v5
+- uses: astral-sh/setup-uv@v6
+- run: uvx --from git+https://github.com/eclnz/messie.git messie docs --fail-over messy
 ```
 
 Or run it locally to find the worst folders:
@@ -70,9 +71,9 @@ messie ~ | cut -f4 | xargs -n1 ls
 | 2 | usage or read error |
 
 ```yaml
+- uses: actions/checkout@v5
 - uses: astral-sh/setup-uv@v6
-- run: uv tool install git+https://github.com/eclnz/messie.git
-- run: messie docs --fail-over messy
+- run: uvx --from git+https://github.com/eclnz/messie.git messie docs --fail-over messy
 ```
 
 ## Scoring
