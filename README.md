@@ -1,10 +1,18 @@
 # messie
 
-Scores how messy a folder is. Reads the files, groups them by subject, and
-reports folders with mixed topics, misfiled files, duplicates, and debris.
+A linter for folder structure. Fails your CI when a folder turns into a mess.
 
-Deterministic, local only, read only. Non-zero exit when a folder crosses a
-threshold, so it runs in CI like a linter.
+messie reads the files, groups them by subject, and scores each folder 0–100
+for mixed topics, misfiled files, duplicates, and debris. Scores are
+deterministic, so a failure means the files changed, not that the run was
+unlucky. Local only, read only.
+
+```yaml
+- run: uv tool install git+https://github.com/eclnz/messie.git
+- run: messie docs --fail-over messy   # exit 1 if any folder scores 50+
+```
+
+Or run it locally to find the worst folders:
 
 ```text
 $ messie ~/demo
