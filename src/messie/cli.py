@@ -191,6 +191,21 @@ def _roots_for(operands: list[str]) -> tuple[list[Path], list[str]]:
     return roots, errors
 
 
+def _drop_nested(roots: list[Path], depth: int | None) -> list[Path]:
+    """Roots not already reported in full by an enclosing root.
+
+    With a depth limit a nested root reaches folders its ancestor does not,
+    so it is kept and duplicates are removed folder by folder instead.
+    """
+    if depth is not None:
+        return roots
+    return [
+        root
+        for root in roots
+        if not any(other != root and other in root.parents for other in roots)
+    ]
+
+
 def _write_stdout(output: str) -> None:
     if not output:
         return
@@ -248,7 +263,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     completed: list[tuple[Path, list[DirAnalysis], RenderOptions]] = []
     runtime_error = bool(operand_errors)
-    for root in roots:
+    reported: set[Path] = set()
+    for root in _drop_nested(roots, args.depth):
         # Verbose output stays on stderr, so JSON and text remain safe to pipe.
         printer = ProgressPrinter() if args.verbose else None
         if printer is not None:
@@ -261,6 +277,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if printer is not None:
             printer.done(analyses)
+        # A folder reached from two roots has one result; report it once.
+        analyses = [a for a in analyses if a.path not in reported]
+        reported.update(a.path for a in analyses)
         completed.append(
             (
                 root,

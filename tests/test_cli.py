@@ -399,3 +399,15 @@ def test_paths_are_relative_under_the_working_directory(tmp_path, capsys, monkey
     monkeypatch.chdir(folder)
     _, outside = run([str(tmp_path), "--st", "--json"], capsys)
     assert only_root(outside)["root"] == str(tmp_path)
+
+
+def test_nested_roots_report_each_folder_once(tmp_path, capsys):
+    for parent in (tmp_path, tmp_path / "child"):
+        for i in range(6):
+            write_blob(parent / f"DSC_{i:03d}.jpg", 4000 + i)
+    child = str(tmp_path / "child")
+
+    for argv in ([str(tmp_path), child], [child, str(tmp_path)], [str(tmp_path), child, "-d", "0"]):
+        _, out = run([*argv, "--st"], capsys)
+        paths = [line.split("\t")[3] for line in out.splitlines()]
+        assert sorted(paths) == sorted({str(tmp_path), child}), argv
