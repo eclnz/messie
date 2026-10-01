@@ -268,6 +268,75 @@ def test_show_all_handles_multiple_tidy_folders(tmp_path, capsys):
     assert all(line.split("\t")[1] == "tidy" for line in lines)
 
 
+def test_show_categories_and_all_keep_analysis_separate(tmp_path, capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    from messie.config import DEFAULT_SETTINGS
+    from messie.result import DirAnalysis, Finding, SkipReason, Verdict
+
+    analyses = [
+        DirAnalysis(path=tmp_path / "tidy", embedder="test", n_files=8),
+        DirAnalysis(
+            path=tmp_path / "skipped", embedder="test", n_files=1,
+            judged=False, skip_reason=SkipReason.TOO_FEW_FILES,
+        ),
+        DirAnalysis(
+            path=tmp_path / "lived-in", embedder="test", n_files=8,
+            verdict=Verdict.LIVED_IN,
+            findings=[Finding(code="example", severity=0.1, headline="Example")],
+        ),
+    ]
+    settings_seen = []
+
+    def fake_analyze(root, settings, **kwargs):
+        settings_seen.append(settings)
+        return analyses
+
+    monkeypatch.setattr("messie.cli.get_embedder", lambda: SimpleNamespace(name="test"))
+    monkeypatch.setattr("messie.cli.analyze_tree", fake_analyze)
+    common = [str(tmp_path), "--json", "--min-verdict", "chaotic", "--fail-over", "chaotic"]
+
+    _, out = run([*common, "--show", "tidy, skipped"], capsys)
+    assert {Path(row["path"]).name for row in only_root(out)["folders"]} == {
+        "tidy", "skipped",
+    }
+
+    _, out = run([*common, "--show", "all"], capsys)
+    assert {Path(row["path"]).name for row in only_root(out)["folders"]} == {
+        "tidy", "skipped", "lived-in",
+    }
+
+    _, out = run([*common, "--sa"], capsys)
+    assert {Path(row["path"]).name for row in only_root(out)["folders"]} == {
+        "tidy", "skipped",
+    }
+    assert all(
+        settings.min_files_to_judge == DEFAULT_SETTINGS.min_files_to_judge
+        for settings in settings_seen
+    )
+
+
+@pytest.mark.parametrize("value", ["", "tidy,", ",skipped", "tidy,unknown"])
+def test_show_rejects_invalid_categories(tmp_path, capsys, value):
+    with pytest.raises(SystemExit) as stopped:
+        main([str(tmp_path), "--show", value])
+    assert stopped.value.code == 2
+    assert "choose tidy, skipped, or all" in capsys.readouterr().err
+
+
+def test_help_shows_only_current_display_option():
+    from messie.cli import build_parser
+
+    help_text = build_parser().format_help()
+    assert "--show CATEGORIES" in help_text
+    assert "--st" not in help_text
+    assert "--ss" not in help_text
+    assert "--sa" not in help_text
+    assert "--show-tidy" not in help_text
+    assert "--show-skipped" not in help_text
+    assert "--show-all" not in help_text
+
+
 def test_text_output_is_unix_friendly_tsv(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     folder = tmp_path / "album with spaces"

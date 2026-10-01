@@ -47,6 +47,15 @@ def _threshold(text: str) -> float:
     return value
 
 
+def _show_categories(text: str) -> frozenset[str]:
+    categories = [part.strip().lower() for part in text.split(",")]
+    if any(part not in {"tidy", "skipped", "all"} for part in categories):
+        raise argparse.ArgumentTypeError(
+            "choose tidy, skipped, or all (comma-separated)"
+        )
+    return frozenset(categories)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="messie",
@@ -85,16 +94,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="analyze every non-empty scanned folder",
     )
     parser.add_argument(
+        "--show", type=_show_categories, default=frozenset(), metavar="CATEGORIES",
+        help="include tidy, skipped, or all folders (comma-separated)",
+    )
+    parser.add_argument(
         "--st", "--show-tidy", dest="show_tidy", action="store_true",
-        help="include tidy folders in output",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--ss", "--show-skipped", dest="show_skipped", action="store_true",
-        help="include skipped folders in output",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--sa", "--show-all", dest="show_all_output", action="store_true",
-        help="include tidy and skipped folders in output",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(
@@ -301,8 +314,11 @@ def main(argv: list[str] | None = None) -> int:
                 RenderOptions(
                     root=root,
                     colour=colour,
-                    show_tidy=args.show_tidy or args.show_all_output,
-                    show_skipped=args.show_skipped or args.show_all_output,
+                    show_tidy=(args.show_tidy or args.show_all_output or "tidy" in args.show),
+                    show_skipped=(
+                        args.show_skipped or args.show_all_output or "skipped" in args.show
+                    ),
+                    show_all="all" in args.show,
                     min_verdict=min_verdict,
                     fail_over=fail_over,
                 ),

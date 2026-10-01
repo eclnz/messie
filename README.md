@@ -33,7 +33,8 @@ The embedding model ([wordllama](https://pypi.org/project/wordllama/)) ships wit
 messie                        # current folder and its descendants
 messie ~/Drive --depth 5      # report 5 levels; read deeper folders as evidence
 messie ~/Downloads --all      # also judge folders with < 6 files
-messie ~/Downloads --sa       # include tidy and skipped folders
+messie ~/Downloads --show tidy,skipped  # include tidy and skipped folders
+messie ~/Downloads --show all           # show every folder within reporting depth
 messie ~/Downloads --json     # or --jsonl
 messie ~/Drive --folder       # find folders unusual for their surroundings
 messie ~/Drive -v             # progress on stderr

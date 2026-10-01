@@ -37,6 +37,7 @@ class RenderOptions:
     verbose: bool = False
     show_tidy: bool = False
     show_skipped: bool = False
+    show_all: bool = False
     min_verdict: Verdict = Verdict.LIVED_IN
     #: Folders at or above this verdict fail the run, so they are always shown.
     fail_over: Verdict | None = None
@@ -120,6 +121,9 @@ def visible_analyses(
     """
     selected: list[DirAnalysis] = []
     for analysis in analyses:
+        if opts.show_all:
+            selected.append(analysis)
+            continue
         if not analysis.judged:
             if opts.show_skipped:
                 selected.append(analysis)
