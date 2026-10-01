@@ -5,6 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class FindingData(Protocol):
+    """Typed finding evidence that can be rendered in structured output."""
+
+    def to_dict(self) -> dict[str, object]: ...
 
 
 class Verdict(IntEnum):
@@ -25,7 +33,7 @@ class Finding:
     headline: str
     detail: str = ""
     examples: list[str] = field(default_factory=list)
-    data: dict = field(default_factory=dict)
+    data: Any = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.severity = max(0.0, min(1.0, float(self.severity)))

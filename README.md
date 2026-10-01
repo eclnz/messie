@@ -30,11 +30,14 @@ The embedding model ([wordllama](https://pypi.org/project/wordllama/)) ships wit
 ## Use
 
 ```bash
-messie                        # current folder, 3 levels deep
-messie ~/Drive --depth 5
+messie                        # current folder and its descendants
+messie ~/Drive --depth 5      # report 5 levels; read deeper folders as evidence
 messie ~/Downloads --all      # also judge folders with < 6 files
-messie ~/Downloads --sa       # include tidy and skipped folders
+messie ~/Downloads --show tidy,skipped  # include tidy and skipped folders
+messie ~/Downloads --show all           # show every folder within reporting depth
 messie ~/Downloads --json     # or --jsonl
+messie ~/Drive --folder       # find folders unusual for their surroundings
+messie ~/Drive -v             # progress on stderr
 messie ~/Downloads/2026*      # globs; each match runs separately
 ```
 
@@ -80,6 +83,7 @@ messie ~ | cut -f4 | xargs -n1 ls
 | no_common_thread | no subject connects the files |
 | strays | files that fit no meaningful group |
 | misfiled_neighbours | loose files resembling a subfolder's contents |
+| folder_placement | a subtree that looks out of place locally (opt in with `-f`) |
 | overcrowded | many loose files (opt in with `-c`) |
 | debris | temporary, empty, or unnamed files |
 | version_pileups | multiple revisions of one file |
@@ -88,7 +92,29 @@ messie ~ | cut -f4 | xargs -n1 ls
 
 tidy 0–24, lived-in 25–49, messy 50–74, chaotic 75–100. Folders with fewer than six files are skipped unless `--all`.
 
+With `--folder`, a folder with few direct files can still get a placement finding
+when its subtree has enough readable files. Messie compares it with its local
+surroundings, allowing for variety among sibling folders. A related folder
+elsewhere may explain the finding; it is not a proposed destination. The checks
+use contents and names without rules for particular folder layouts.
+
 Reads text, office formats, HTML, CSV, source, and subtitles; PDF optional. Other files are judged by name, kind, and metadata. No OCR. Embeddings are strongest on English; tune with `--threshold`. Hidden files and `.git`, `node_modules`, `.venv`, `dist`, etc. are skipped.
+
+`tests/corpus/` includes placement ground truth with local outliers, parallel
+branches, and decoys with partly matching contents or shared names.
+
+### Required files and folders
+
+Put an `ignore.messie` file in a folder to exclude required files or folders from Messie's analysis. Write one path pattern per line; blank lines and lines starting with `#` are ignored. For example:
+
+```text
+# Files required at the package root
+/package.json
+*.lock
+src/generated/
+```
+
+Patterns without `/` match names at any depth beneath that file. A leading `/` anchors a name to that folder. Other patterns containing `/` are relative to its folder; `*` matches within one path segment and `**` matches across folders. A trailing `/` matches folders only. Rules apply to that folder and its descendants, and a nested `ignore.messie` adds more rules. The `ignore.messie` file itself is never analyzed. Files that match a rule do not contribute to counts, embeddings, or findings.
 
 ## Development
 

@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from messie.analyze import Progress
-from messie.result import DirAnalysis, Verdict
+from messie.paths import display_path
+from messie.result import DirAnalysis, FindingData, Verdict
 
 _COLOURS = {
     Verdict.TIDY: "\033[32m",
@@ -36,7 +37,10 @@ class RenderOptions:
     verbose: bool = False
     show_tidy: bool = False
     show_skipped: bool = False
+    show_all: bool = False
     min_verdict: Verdict = Verdict.LIVED_IN
+    #: Folders at or above this verdict fail the run, so they are always shown.
+    fail_over: Verdict | None = None
 
 
 def supports_colour(stream=sys.stdout) -> bool:
@@ -56,18 +60,6 @@ def _fit(text: str, width: int) -> str:
     return text.ljust(width)
 
 
-def _display_path(path: Path, root: Path) -> str:
-    """Return a path that another command can use from the current directory."""
-    del root  # Paths are records now, so they must not depend on a scan root.
-    try:
-        relative = os.path.relpath(path, Path.cwd())
-    except (OSError, ValueError):
-        return str(path)
-    if relative == "." or relative.startswith("../"):
-        return relative
-    return "./" + relative
-
-
 def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
     """Render one tab-separated folder record.
 
@@ -84,7 +76,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
                     "-",
                     "skipped",
                     str(analysis.n_files),
-                    _display_path(analysis.path, opts.root),
+                    display_path(analysis.path),
                     reason,
                 )
             )
@@ -102,7 +94,7 @@ def render_dir(analysis: DirAnalysis, opts: RenderOptions) -> list[str]:
                 f"{analysis.score:g}",
                 verdict,
                 str(analysis.n_files),
-                _display_path(analysis.path, opts.root),
+                display_path(analysis.path),
                 codes,
             )
         )
@@ -122,12 +114,22 @@ def visible_analyses(
     analyses: list[DirAnalysis],
     opts: RenderOptions,
 ) -> list[DirAnalysis]:
-    """Select findings, plus independently requested tidy or skipped folders."""
+    """Select findings, plus independently requested tidy or skipped folders.
+
+    A folder that fails the run is always selected, so a failing exit status
+    never arrives without the folders that caused it.
+    """
     selected: list[DirAnalysis] = []
     for analysis in analyses:
+        if opts.show_all:
+            selected.append(analysis)
+            continue
         if not analysis.judged:
             if opts.show_skipped:
                 selected.append(analysis)
+            continue
+        if opts.fail_over is not None and analysis.verdict >= opts.fail_over:
+            selected.append(analysis)
             continue
         if analysis.verdict is Verdict.TIDY:
             if opts.show_tidy:
@@ -141,7 +143,7 @@ def visible_analyses(
 def to_dict(analysis: DirAnalysis) -> dict:
     if not analysis.judged:
         return {
-            "path": str(analysis.path),
+            "path": display_path(analysis.path),
             "files": analysis.n_files,
             "skip_reason": (
                 analysis.skip_reason.value if analysis.skip_reason else "unknown"
@@ -149,7 +151,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
         }
 
     payload = {
-        "path": str(analysis.path),
+        "path": display_path(analysis.path),
         "files": analysis.n_files,
         "score": analysis.score,
         "verdict": _VERDICT_LABELS[analysis.verdict],
@@ -161,7 +163,7 @@ def to_dict(analysis: DirAnalysis) -> dict:
                 "headline": f.headline,
                 "detail": f.detail,
                 "examples": f.examples,
-                "data": f.data,
+                "data": f.data.to_dict() if isinstance(f.data, FindingData) else f.data,
             }
             for f in analysis.findings
         ],
@@ -173,18 +175,25 @@ def to_dict(analysis: DirAnalysis) -> dict:
     return payload
 
 
-def render_json(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
+def render_json(results: list[tuple[list[DirAnalysis], RenderOptions]]) -> str:
+    """One JSON document with a record per root, however many roots there are."""
     payload = {
-        "root": str(opts.root),
-        "folders": [to_dict(a) for a in visible_analyses(analyses, opts)],
+        "roots": [
+            {
+                "root": display_path(opts.root),
+                "folders": [to_dict(a) for a in visible_analyses(analyses, opts)],
+            }
+            for analyses, opts in results
+        ]
     }
     return json.dumps(payload, indent=2, default=str)
 
 
 def render_json_lines(analyses: list[DirAnalysis], opts: RenderOptions) -> str:
     """One compact JSON object per selected folder."""
+    root = display_path(opts.root)
     return "\n".join(
-        json.dumps({"root": str(opts.root), **to_dict(analysis)}, default=str)
+        json.dumps({"root": root, **to_dict(analysis)}, default=str)
         for analysis in visible_analyses(analyses, opts)
     )
 
@@ -199,6 +208,7 @@ class ProgressPrinter:
         "scan": "scanning",
         "read": "reading",
         "judge": "judging",
+        "place": "placing",
     }
 
     def __init__(self, stream=None, colour: bool | None = None, width: int = 78) -> None:
@@ -233,7 +243,7 @@ class ProgressPrinter:
         )
         if self._live:
             self._stream.write("\r" + _fit(_paint(line, _DIM, self._colour), self._width))
-            if last and progress.stage == "judge":
+            if last and progress.stage in {"judge", "place"}:
                 self._stream.write("\r" + " " * self._width + "\r")
         elif changed or last:
             self._stream.write(line.rstrip() + "\n")
