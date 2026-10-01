@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "messie"
-version = "0.1.0"
+version = "0.2.0"
 description = "Notices when a folder has become a mess. Local only, no external services."
 readme = "README.md"
 requires-python = ">=3.10"
