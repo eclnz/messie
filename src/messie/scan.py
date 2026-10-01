@@ -1,12 +1,14 @@
-"""Scan folder entries without opening files."""
+"""Scan folder entries, reading only explicit ``ignore.messie`` rules."""
 
 from __future__ import annotations
 
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from messie.config import DEFAULT_SETTINGS, Settings
+from messie.ignore import IgnoreRules
 from messie.kinds import Domain, Kind, domain_for, kind_for
 
 
@@ -40,6 +42,8 @@ class DirContents:
     truncated: int = 0
     #: Levels below the walk's root.
     depth: int = 0
+    #: Active rules are passed to child folders during a tree walk.
+    ignore_rules: tuple[IgnoreRules, ...] = field(default_factory=tuple, repr=False)
 
     def __len__(self) -> int:
         return len(self.files)
@@ -56,7 +60,11 @@ def _entry_for(path: Path, st: os.stat_result) -> FileEntry:
     )
 
 
-def read_dir(path: Path, settings: Settings = DEFAULT_SETTINGS) -> DirContents:
+def read_dir(
+    path: Path,
+    settings: Settings = DEFAULT_SETTINGS,
+    inherited_rules: tuple[IgnoreRules, ...] = (),
+) -> DirContents:
     """Record the direct children of one folder."""
     contents = DirContents(path=path)
     try:
@@ -64,8 +72,15 @@ def read_dir(path: Path, settings: Settings = DEFAULT_SETTINGS) -> DirContents:
     except (PermissionError, OSError):
         return contents
 
+    local = next((item for item in raw if item.name == "ignore.messie"), None)
+    if local is not None and local.is_file(follow_symlinks=False):
+        inherited_rules += (IgnoreRules.read(Path(local.path)),)
+    contents.ignore_rules = inherited_rules
+
     for item in raw:
         name = item.name
+        if name == "ignore.messie":
+            continue
         if (
             name.startswith(".")
             and not settings.include_hidden
@@ -74,10 +89,16 @@ def read_dir(path: Path, settings: Settings = DEFAULT_SETTINGS) -> DirContents:
             continue
         try:
             if item.is_dir(follow_symlinks=settings.follow_symlinks):
-                if not settings.is_ignored_dir(name):
+                if not settings.is_ignored_dir(name) and not any(
+                    rules.matches(Path(item.path), is_dir=True) for rules in inherited_rules
+                ):
                     contents.subdirs.append(Path(item.path))
                 continue
             if item.is_symlink() and not settings.follow_symlinks:
+                continue
+            if any(
+                rules.matches(Path(item.path), is_dir=False) for rules in inherited_rules
+            ):
                 continue
             st = item.stat(follow_symlinks=False)
         except (PermissionError, OSError):
@@ -109,19 +130,19 @@ def walk(root: Path, settings: Settings = DEFAULT_SETTINGS) -> list[DirContents]
         raise NotADirectoryError(root)
 
     out: list[DirContents] = []
-    queue: list[tuple[Path, int]] = [(root, 0)]
+    queue: deque[tuple[Path, int, tuple[IgnoreRules, ...]]] = deque([(root, 0, ())])
     seen: set[Path] = set()
 
     while queue:
-        path, depth = queue.pop(0)
+        path, depth, inherited_rules = queue.popleft()
         real = path.resolve()
         if real in seen:
             continue
         seen.add(real)
 
-        contents = read_dir(path, settings)
+        contents = read_dir(path, settings, inherited_rules)
         contents.depth = depth
         out.append(contents)
         if settings.max_depth is None or depth < settings.max_depth:
-            queue.extend((sub, depth + 1) for sub in contents.subdirs)
+            queue.extend((sub, depth + 1, contents.ignore_rules) for sub in contents.subdirs)
     return out

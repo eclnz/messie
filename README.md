@@ -103,6 +103,19 @@ Reads text, office formats, HTML, CSV, source, and subtitles; PDF optional. Othe
 `tests/corpus/` includes placement ground truth with local outliers, parallel
 branches, and decoys with partly matching contents or shared names.
 
+### Required files and folders
+
+Put an `ignore.messie` file in a folder to exclude required files or folders from Messie's analysis. Write one path pattern per line; blank lines and lines starting with `#` are ignored. For example:
+
+```text
+# Files required at the package root
+/package.json
+*.lock
+src/generated/
+```
+
+Patterns without `/` match names at any depth beneath that file. A leading `/` anchors a name to that folder. Other patterns containing `/` are relative to its folder; `*` matches within one path segment and `**` matches across folders. A trailing `/` matches folders only. Rules apply to that folder and its descendants, and a nested `ignore.messie` adds more rules. The `ignore.messie` file itself is never analyzed. Files that match a rule do not contribute to counts, embeddings, or findings.
+
 ## Development
 
 ```bash
