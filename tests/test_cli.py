@@ -22,6 +22,13 @@ def run(argv, capsys):
     return code, capsys.readouterr().out
 
 
+def only_root(out):
+    """The single root record of a --json document."""
+    roots = json.loads(out)["roots"]
+    assert len(roots) == 1
+    return roots[0]
+
+
 def test_reports_a_mess_and_exits_one(messy_tree, capsys):
     code, out = run([str(messy_tree), "--no-color"], capsys)
     assert code == 1
@@ -41,7 +48,7 @@ def test_tidy_folder_exits_zero(tmp_path, capsys):
 
 def test_json_output_is_valid_and_complete(messy_tree, capsys):
     code, out = run([str(messy_tree), "--json"], capsys)
-    payload = json.loads(out)
+    payload = only_root(out)
 
     assert payload["root"] == str(messy_tree.resolve())
     folder = payload["folders"][0]
@@ -115,10 +122,10 @@ def test_all_analyzes_a_folder_that_would_otherwise_be_skipped(tmp_path, capsys)
     (tmp_path / "only.txt").write_text("one small note")
 
     _, out = run([str(tmp_path), "--json", "--ss"], capsys)
-    assert json.loads(out)["folders"][0]["skip_reason"] == "too_few_files"
+    assert only_root(out)["folders"][0]["skip_reason"] == "too_few_files"
 
     _, out = run(["-a", "-d", "0", "--st", str(tmp_path), "--json"], capsys)
-    analyzed = json.loads(out)["folders"][0]
+    analyzed = only_root(out)["folders"][0]
     assert analyzed["verdict"] == "tidy"
     assert "skip_reason" not in analyzed
 
@@ -141,7 +148,7 @@ def test_file_glob_analyzes_its_containing_folder(tmp_path, capsys):
         (tmp_path / f"note-{i}.txt").write_text("one coherent subject " * 20)
 
     _, out = run([str(tmp_path / "*.txt"), "--st", "--json"], capsys)
-    payload = json.loads(out)
+    payload = only_root(out)
 
     assert payload["root"] == str(tmp_path.resolve())
 
@@ -154,7 +161,7 @@ def test_dash_reads_newline_delimited_paths(tmp_path, capsys, monkeypatch):
 
     _, out = run(["-", "--st", "--json"], capsys)
 
-    assert json.loads(out)["root"] == str(folder.resolve())
+    assert only_root(out)["root"] == str(folder.resolve())
 
 
 def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
@@ -166,7 +173,7 @@ def test_null_delimited_stdin_and_json_lines(tmp_path, capsys, monkeypatch):
             write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
     monkeypatch.setattr("sys.stdin", io.StringIO("\0".join(map(str, roots)) + "\0"))
 
-    code, out = run(["-0", "-", "--st", "--jsonl"], capsys)
+    code, out = run(["-z", "-", "--st", "--jsonl"], capsys)
     records = [json.loads(line) for line in out.splitlines()]
 
     assert code == 0
@@ -185,13 +192,13 @@ def test_quiet_mode_uses_only_exit_status(messy_tree, capsys):
 def test_json_omits_skipped_folders_unless_requested(tmp_path, capsys):
     (tmp_path / "only.txt").write_text("too small")
     _, out = run([str(tmp_path), "--json"], capsys)
-    assert json.loads(out)["folders"] == []
+    assert only_root(out)["folders"] == []
 
     _, out = run([str(tmp_path), "--json", "--show-tidy"], capsys)
-    assert json.loads(out)["folders"] == []
+    assert only_root(out)["folders"] == []
 
     _, out = run([str(tmp_path), "--json", "--show-skipped"], capsys)
-    skipped = json.loads(out)["folders"]
+    skipped = only_root(out)["folders"]
     assert skipped == [
         {
             "path": str(tmp_path),
@@ -201,7 +208,7 @@ def test_json_omits_skipped_folders_unless_requested(tmp_path, capsys):
     ]
 
     _, out = run([str(tmp_path), "--json", "--show-all"], capsys)
-    assert json.loads(out)["folders"] == skipped
+    assert only_root(out)["folders"] == skipped
 
 
 def test_json_lines_can_show_skipped_folders(tmp_path, capsys):
@@ -225,13 +232,13 @@ def test_json_hides_tidy_folders_unless_requested(tmp_path, capsys):
         write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
 
     _, out = run([str(folder), "--json", "--min-verdict", "tidy"], capsys)
-    assert json.loads(out)["folders"] == []
+    assert only_root(out)["folders"] == []
 
     _, out = run([str(folder), "--json", "--show-skipped"], capsys)
-    assert json.loads(out)["folders"] == []
+    assert only_root(out)["folders"] == []
 
     _, out = run([str(folder), "--json", "--show-tidy"], capsys)
-    included = json.loads(out)["folders"]
+    included = only_root(out)["folders"]
     assert len(included) == 1
     assert included[0]["findings"] == []
 
@@ -322,8 +329,7 @@ def test_verbose_json_still_parses(messy_tree, capsys):
     code = main([str(messy_tree), "--json", "--verbose"])
     captured = capsys.readouterr()
     assert code in (0, 1)
-    payload = json.loads(captured.out)
-    assert payload["folders"]
+    assert only_root(captured.out)["folders"]
 
 
 def test_verbose_names_every_stage_and_the_cost(messy_tree, capsys):
@@ -364,3 +370,79 @@ def test_analyze_tree_without_a_progress_callback_is_unchanged(tmp_path):
     quiet = analyze_tree(tmp_path)
     noisy = analyze_tree(tmp_path, progress=lambda _: None)
     assert [a.score for a in quiet] == [a.score for a in noisy]
+
+
+def test_json_shape_does_not_depend_on_the_number_of_roots(tmp_path, capsys):
+    for name in ("left", "right"):
+        for i in range(6):
+            write_blob(tmp_path / name / f"DSC_{i:03d}.jpg", 4000 + i)
+
+    _, one = run([str(tmp_path / "left"), "--json"], capsys)
+    _, two = run([str(tmp_path / "left"), str(tmp_path / "right"), "--json"], capsys)
+
+    assert list(json.loads(one)) == list(json.loads(two)) == ["roots"]
+    assert len(json.loads(two)["roots"]) == 2
+
+
+def test_paths_are_relative_under_the_working_directory(tmp_path, capsys, monkeypatch):
+    folder = tmp_path / "album"
+    for i in range(6):
+        write_blob(folder / f"DSC_{i:03d}.jpg", 4000 + i)
+    monkeypatch.chdir(tmp_path)
+
+    _, tsv = run(["album", "--st"], capsys)
+    _, doc = run(["album", "--st", "--json"], capsys)
+
+    assert tsv.split("\t")[3] == "./album"
+    assert only_root(doc)["root"] == "./album"
+    assert only_root(doc)["folders"][0]["path"] == "./album"
+    monkeypatch.chdir(folder)
+    _, outside = run([str(tmp_path), "--st", "--json"], capsys)
+    assert only_root(outside)["root"] == str(tmp_path)
+
+
+def test_nested_roots_report_each_folder_once(tmp_path, capsys):
+    for parent in (tmp_path, tmp_path / "child"):
+        for i in range(6):
+            write_blob(parent / f"DSC_{i:03d}.jpg", 4000 + i)
+    child = str(tmp_path / "child")
+
+    for argv in ([str(tmp_path), child], [child, str(tmp_path)], [str(tmp_path), child, "-d", "0"]):
+        _, out = run([*argv, "--st"], capsys)
+        paths = [line.split("\t")[3] for line in out.splitlines()]
+        assert sorted(paths) == sorted({str(tmp_path), child}), argv
+
+
+def test_folders_that_fail_the_run_are_always_shown(messy_tree, capsys):
+    argv = [str(messy_tree), "--min-verdict", "chaotic", "--fail-over", "lived-in"]
+    code, out = run(argv, capsys)
+
+    assert code == 1
+    assert out.strip(), "a failing exit status must name the folder that caused it"
+
+
+@pytest.mark.parametrize("value", ["5", "0", "1", "-0.2"])
+def test_threshold_outside_zero_to_one_is_a_usage_error(tmp_path, capsys, value):
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path), "--threshold", value])
+    assert exc.value.code == 2
+    assert "between 0 and 1" in capsys.readouterr().err
+
+
+def test_negative_numbers_reach_their_validators(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        main([str(tmp_path), "--depth", "-1"])
+    assert "must be 0 or more" in capsys.readouterr().err
+
+
+def test_standard_input_is_read_only_when_asked_for(tmp_path, capsys, monkeypatch):
+    class Unread(io.StringIO):
+        def read(self, *args):
+            raise AssertionError("messie read standard input without '-'")
+
+    monkeypatch.setattr("sys.stdin", Unread())
+    monkeypatch.setattr("sys.argv", ["messie"])
+    monkeypatch.chdir(tmp_path)
+
+    assert main() == 0
+    capsys.readouterr()

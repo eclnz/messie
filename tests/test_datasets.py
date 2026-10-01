@@ -209,3 +209,32 @@ def test_demo_tree(tmp_path, real_embedder):
     assert results["Pictures/Wedding"].verdict == Verdict.TIDY
     assert results["Work/Invoices"].verdict < Verdict.MESSY
     assert results["Projects/ledger-api"].verdict < Verdict.MESSY
+
+
+def test_depth_limits_reporting_but_not_evidence(tmp_path, real_embedder):
+    """A folder at the depth limit is still compared with the folders below it."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from build_demo_tree import build
+
+    from messie.analyze import analyze_tree
+    from messie.config import DEFAULT_SETTINGS
+
+    root = build(tmp_path / "home")
+    documents = root / "Documents"
+
+    def judged(depth):
+        settings = DEFAULT_SETTINGS.with_(max_depth=depth)
+        return {
+            a.path.resolve(): a
+            for a in analyze_tree(documents, settings, embedder=real_embedder)
+        }
+
+    unlimited = judged(None)
+    shallow = judged(0)
+
+    assert set(shallow) == {documents.resolve()}
+    assert shallow[documents.resolve()].score == unlimited[documents.resolve()].score
+    codes = {f.code for f in shallow[documents.resolve()].findings}
+    assert "misfiled_neighbours" in codes

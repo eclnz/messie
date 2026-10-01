@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import json
 import os
 import sys
 from pathlib import Path
@@ -30,6 +29,22 @@ def _parse_verdict(text: str) -> Verdict:
         return Verdict[key]
     except KeyError as exc:
         raise ValueError(f"unknown verdict {text!r}") from exc
+
+
+def _depth(text: str) -> int:
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {value}")
+    return value
+
+
+def _threshold(text: str) -> float:
+    value = float(text)
+    if not 0 < value < 1:
+        raise argparse.ArgumentTypeError(
+            f"must be a similarity between 0 and 1, not {text}"
+        )
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,9 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="write one compact JSON object per folder",
     )
     parser.add_argument(
-        "-d", "--depth", "--max-depth", type=int,
-        default=DEFAULT_SETTINGS.max_depth,
-        help="maximum recursion depth (default: %(default)s)",
+        "-d", "--depth", "--max-depth", type=_depth, default=None,
+        help=(
+            "deepest folder level to judge and report; deeper folders are "
+            "still read as evidence (default: no limit)"
+        ),
     )
     parser.add_argument(
         "-a", "--all", dest="analyze_all", action="store_true",
@@ -81,8 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--hidden", action="store_true", help="include hidden files")
     parser.add_argument(
-        "-t", "--threshold", type=float, default=None,
-        help="similarity below which two files count as unrelated",
+        "-t", "--threshold", type=_threshold, default=None,
+        help=(
+            "similarity, between 0 and 1, below which two files count as "
+            "unrelated (default: set by the embedding model)"
+        ),
     )
     parser.add_argument(
         "-m", "--min-verdict", default="lived-in",
@@ -109,8 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
         "-v", "--verbose", action="store_true",
         help="show progress on standard error",
     )
+    # Not -0: an option that looks like a number stops argparse accepting
+    # negative values anywhere else on the command line.
     parser.add_argument(
-        "-0", "--null", action="store_true",
+        "-z", "--null", action="store_true",
         help="split standard-input paths on NUL bytes instead of newlines",
     )
     parser.add_argument(
@@ -136,15 +158,13 @@ def _read_stdin(null: bool) -> list[str]:
     return [chunk.rstrip("\r") for chunk in chunks if chunk]
 
 
-def _path_operands(paths: list[str], *, null: bool, implicit_stdin: bool) -> list[str]:
+def _path_operands(paths: list[str], *, null: bool) -> list[str]:
+    """Expand '-' into paths read from standard input; default to '.'.
+
+    Standard input is read only when asked for, so messie never swallows
+    input meant for something else, such as the loop in ``while read``.
+    """
     if not paths:
-        if implicit_stdin and not getattr(sys.stdin, "isatty", lambda: True)():
-            try:
-                piped = _read_stdin(null)
-                if piped:
-                    return piped
-            except OSError:
-                pass
         return ["."]
 
     operands: list[str] = []
@@ -187,6 +207,21 @@ def _roots_for(operands: list[str]) -> tuple[list[Path], list[str]]:
     return roots, errors
 
 
+def _drop_nested(roots: list[Path], depth: int | None) -> list[Path]:
+    """Roots not already reported in full by an enclosing root.
+
+    With a depth limit a nested root reaches folders its ancestor does not,
+    so it is kept and duplicates are removed folder by folder instead.
+    """
+    if depth is not None:
+        return roots
+    return [
+        root
+        for root in roots
+        if not any(other != root and other in root.parents for other in roots)
+    ]
+
+
 def _write_stdout(output: str) -> None:
     if not output:
         return
@@ -201,7 +236,6 @@ def _write_stdout(output: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    implicit_stdin = argv is None
     args = build_parser().parse_args(argv)
 
     try:
@@ -212,9 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        operands = _path_operands(
-            args.paths, null=args.null, implicit_stdin=implicit_stdin
-        )
+        operands = _path_operands(args.paths, null=args.null)
     except OSError as exc:
         print(f"messie: standard input: {exc}", file=sys.stderr)
         return 2
@@ -225,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not operands and not operand_errors else 2
 
     settings = DEFAULT_SETTINGS.with_(
-        max_depth=max(0, args.depth),
+        max_depth=args.depth,
         include_hidden=args.hidden,
         report_crowding=args.crowding,
         report_folder_placement=args.folder,
@@ -245,7 +277,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     completed: list[tuple[Path, list[DirAnalysis], RenderOptions]] = []
     runtime_error = bool(operand_errors)
-    for root in roots:
+    reported: set[Path] = set()
+    for root in _drop_nested(roots, args.depth):
         # Verbose output stays on stderr, so JSON and text remain safe to pipe.
         printer = ProgressPrinter() if args.verbose else None
         if printer is not None:
@@ -258,6 +291,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if printer is not None:
             printer.done(analyses)
+        # A folder reached from two roots has one result; report it once.
+        analyses = [a for a in analyses if a.path not in reported]
+        reported.update(a.path for a in analyses)
         completed.append(
             (
                 root,
@@ -268,18 +304,14 @@ def main(argv: list[str] | None = None) -> int:
                     show_tidy=args.show_tidy or args.show_all_output,
                     show_skipped=args.show_skipped or args.show_all_output,
                     min_verdict=min_verdict,
+                    fail_over=fail_over,
                 ),
             )
         )
 
     if not args.quiet:
         if args.json:
-            payloads = [json.loads(render_json(items, opts)) for _, items, opts in completed]
-            output = (
-                json.dumps(payloads[0], indent=2, default=str)
-                if len(payloads) == 1
-                else json.dumps({"roots": payloads}, indent=2, default=str)
-            )
+            output = render_json([(items, opts) for _, items, opts in completed])
         elif args.jsonl:
             output = "\n".join(
                 rendered

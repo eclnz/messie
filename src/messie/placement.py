@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
+from messie.paths import display_path
 from messie.result import Finding
 
 if TYPE_CHECKING:
@@ -49,7 +50,7 @@ class PlacementEvidence:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "related_folder": str(self.related_folder) if self.related_folder else None,
+            "related_folder": display_path(self.related_folder) if self.related_folder else None,
             "subtree_files": self.subtree_files,
             "current_fit": round(self.current_fit, 3),
             "expected_fit": round(self.expected_fit, 3),
@@ -365,7 +366,7 @@ def folder_placement_findings(
         related = best[1] if best else None
         detail = "Its contents differ from the pattern around its parent folder."
         if related is not None:
-            detail += f" Related contents appear in {related}."
+            detail += f" Related contents appear in {display_path(related)}."
         findings[path] = Finding(
             code="folder_placement",
             severity=severity,

@@ -1,115 +1,106 @@
 # messie
 
-Messie finds folders whose files cover unrelated subjects. It reads the files, groups them by subject, and reports where a folder looks mixed, with examples. Analysis runs locally and doesn't call external modes, and it never changes files.
+A linter for folder structure. Fails your CI when a folder turns into a mess.
+
+messie reads the files, groups them by subject, and scores each folder 0–100 for mixed topics, misfiled files, duplicates, and debris. Scores are deterministic, so a failure means the files changed, not that the run was unlucky. Local only, read only.
+
+```yaml
+- uses: actions/checkout@v5
+- uses: astral-sh/setup-uv@v6
+- run: uvx --from git+https://github.com/eclnz/messie.git messie docs --fail-over messy
+```
+
+Or run it locally to find the worst folders:
 
 ```text
-$ messie ~/Downloads
-
-88.7    chaotic 39      /messie-demo/Downloads   unrelated_topics,time_strata,duplicates,debris,version_pileups
-82      chaotic 8       /messie-demo/Documents   misfiled_neighbours,unrelated_topics,time_strata
-71.8    messy   18      /messie-demo/Desktop     no_common_thread
+$ messie ~/demo
+88.7    chaotic 39      ./Downloads     unrelated_topics,time_strata,duplicates,debris,version_pileups
+82      chaotic 8       ./Documents     misfiled_neighbours,unrelated_topics,time_strata
+71.8    messy   18      ./Desktop       no_common_thread
 ```
 
 ## Install
 
 ```bash
-git clone https://github.com/eclnz/messie.git
-uv sync
-uv tool install --editable .
-uv tool update-shell
+uv tool install git+https://github.com/eclnz/messie.git
 ```
 
-The [wordllama](https://pypi.org/project/wordllama/) model ships with the
-package.
+The embedding model ([wordllama](https://pypi.org/project/wordllama/)) ships with the package. PDF text needs the `pdf` extra.
 
 ## Use
 
 ```bash
-messie                        # current folder and its subfolders
-messie ~/Documents            # a specific folder
-messie ~/Drive --depth 5      # recurse further; default is 3
-messie ~/Downloads --all      # analyse all folders, including those normally skipped
-messie ~/Downloads --json     # JSON output
+messie                        # current folder and its descendants
+messie ~/Drive --depth 5      # report 5 levels; read deeper folders as evidence
+messie ~/Downloads --all      # also judge folders with < 6 files
+messie ~/Downloads --sa       # include tidy and skipped folders
+messie ~/Downloads --json     # or --jsonl
+messie ~/Drive --folder       # find folders unusual for their surroundings
 messie ~/Drive -v             # progress on stderr
-messie ~/Drive --folder        # find folders unusual for their surroundings
-messie -a --sa --color        # my favorite
-messie -h                     # see the help page for more args
+messie ~/Downloads/2026*      # globs; each match runs separately
 ```
 
-It accepts wildcards, so the following is acceptable:
+Output is TSV, worst first: `SCORE VERDICT FILES PATH FINDINGS`.
+
 ```bash
-messie ~/Downloads/2026* -a --sa --color # note it runs for each path seperately so it is often slower than running for an entire parent.
-messie ~/Downloads -a --sa --color | grep 2026 # the same could be achieved with
+messie ~ | head
+messie ~ | awk '$1 >= 75'
+messie ~ | cut -f4 | xargs -n1 ls
 ```
 
-## What it looks for
+`--json` adds a headline, examples, and data per finding:
+
+```json
+{
+  "code": "misfiled_neighbours",
+  "severity": 1.0,
+  "headline": "3 loose files read like the contents of a folder further down.",
+  "detail": "3 of them resemble ./Taxes.",
+  "examples": ["2023_tax_return_federal.pdf", "tax_return_2022_amended.xlsx"]
+}
+```
+
+## CI
+
+| Exit | |
+|---|---|
+| 0 | all folders below `--fail-over` |
+| 1 | a folder reached `--fail-over` (default `messy`) |
+| 2 | usage or read error |
+
+```yaml
+- uses: actions/checkout@v5
+- uses: astral-sh/setup-uv@v6
+- run: uvx --from git+https://github.com/eclnz/messie.git messie docs --fail-over messy
+```
+
+## Scoring
 
 | Signal | Meaning |
 |---|---|
-| unrelated topics | distinct subjects sharing a folder |
-| nothing in common | no subject connects the files |
-| strays | files that do not fit a meaningful group |
-| misfiled neighbours | loose files resembling a subfolder's contents |
-| folder placement | a subtree that looks out of place locally; opt in with `-f` |
-| overcrowded | many loose files; opt in with `-c` |
-| debris | temporary, empty, or never-named files |
-| version pileups | multiple revisions of one file |
-| duplicates | identical bytes or duplicate text |
-| time strata | unrelated material accumulated in separate periods |
+| unrelated_topics | distinct subjects sharing a folder |
+| no_common_thread | no subject connects the files |
+| strays | files that fit no meaningful group |
+| misfiled_neighbours | loose files resembling a subfolder's contents |
+| folder_placement | a subtree that looks out of place locally (opt in with `-f`) |
+| overcrowded | many loose files (opt in with `-c`) |
+| debris | temporary, empty, or unnamed files |
+| version_pileups | multiple revisions of one file |
+| duplicates | identical bytes or text |
+| time_strata | unrelated material from separate periods |
 
-Signals combine into a score: **tidy** (0–24), **lived-in** (25–49),
-**messy** (50–74), or **chaotic** (75–100). Folders with fewer than six files
-are too small to judge for the usual signals. With `--folder`, Messie can still
-report a placement finding for a folder with few direct files when its subtree
-has enough readable files. It compares the subtree with its surroundings and
-allows for variety among sibling folders. A related folder elsewhere can help
-explain a finding, but Messie does not claim it is the right destination.
-The checks use contents and names without rules for particular folder layouts.
+tidy 0–24, lived-in 25–49, messy 50–74, chaotic 75–100. Folders with fewer than six files are skipped unless `--all`.
 
-## Notes
+With `--folder`, a folder with few direct files can still get a placement finding
+when its subtree has enough readable files. Messie compares it with its local
+surroundings, allowing for variety among sibling folders. A related folder
+elsewhere may explain the finding; it is not a proposed destination. The checks
+use contents and names without rules for particular folder layouts.
 
-Messie reads plain text, common office formats, HTML, CSV, source code, and
-subtitles directly. PDF support is optional. For files without readable text,
-it uses filenames, file kinds, and limited metadata. It does not use OCR or
-image recognition.
+Reads text, office formats, HTML, CSV, source, and subtitles; PDF optional. Other files are judged by name, kind, and metadata. No OCR. Embeddings are strongest on English; tune with `--threshold`. Hidden files and `.git`, `node_modules`, `.venv`, `dist`, etc. are skipped.
 
-Embeddings compare broad subject matter rather than detailed argument. The
-default model is strongest on English; use `--threshold` to tune clustering for
-your folders.
-
-## Example data
-
-`tests/corpus/` contains synthetic documents and builders for test folders.
-Its placement cases label local outliers and clean layouts, including decoys
-with partly matching contents, shared names, and too little context.
-Build a demonstration tree with:
-
-```bash
-> uv run python scripts/build_demo_tree.py /tmp/messie-demo
-
-> uv run messie /tmp/messie-demo
-88.7    chaotic 39      ../../../../private/tmp/messie-demo/Downloads   unrelated_topics,time_strata,duplicates,debris,version_pileups
-82      chaotic 8       ../../../../private/tmp/messie-demo/Documents   misfiled_neighbours,unrelated_topics,time_strata
-71.8    messy   18      ../../../../private/tmp/messie-demo/Desktop     no_common_thread
-
-# Comprehensive version showing it did indeed check all folders
-> uv run messie /tmp/messie-demo --ss --sa
-88.7    chaotic 39      ./Downloads     unrelated_topics,time_strata,duplicates,debris,version_pileups
-82      chaotic 8       ./Documents     misfiled_neighbours,unrelated_topics,time_strata
-71.8    messy   18      ./Desktop       no_common_thread
--       skipped 0       .       too_few_files
--       skipped 0       ./Archive       too_few_files
-0       tidy    60      ./Archive/Scans -
-0       tidy    6       ./Documents/Taxes       -
--       skipped 0       ./Music too_few_files
-0       tidy    16      ./Music/Albums  -
--       skipped 0       ./Pictures      too_few_files
-0       tidy    24      ./Pictures/Wedding      -
--       skipped 0       ./Projects      too_few_files
-0       tidy    8       ./Projects/ledger-api   -
--       skipped 0       ./Work  too_few_files
-0       tidy    9       ./Work/Invoices -
-```
+`tests/corpus/` includes placement ground truth with local outliers, parallel
+branches, and decoys with partly matching contents or shared names.
 
 ## Development
 
@@ -118,7 +109,7 @@ uv sync --all-groups --extra dev --extra all
 uv run pytest
 uv run pyright
 uv run ruff check src tests
+uv run python scripts/build_demo_tree.py /tmp/messie-demo   # sample tree
 ```
 
-`-v` writes progress to stderr, so JSON stays safe to pipe. Set
-`MESSIE_DEBUG=1` to let signal errors raise during development.
+`MESSIE_DEBUG=1` makes signal errors raise.

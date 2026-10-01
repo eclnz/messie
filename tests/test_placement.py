@@ -141,15 +141,19 @@ def test_folder_flag_reports_placement_in_json(tmp_path, fake_embedder, monkeypa
     baseline = json.loads(capsys.readouterr().out)
     assert all(
         finding["code"] != "folder_placement"
-        for folder in baseline["folders"]
+        for folder in baseline["roots"][0]["folders"]
         for finding in folder["findings"]
     )
 
+    monkeypatch.chdir(tmp_path)
     assert main([str(root), "--folder", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
-    folder = next(item for item in payload["folders"] if item["path"] == str(candidate))
+    folder = next(
+        item for item in payload["roots"][0]["folders"]
+        if item["path"] == "./project/a/b"
+    )
     finding = next(item for item in folder["findings"] if item["code"] == "folder_placement")
-    assert finding["data"]["related_folder"] == str(destination)
+    assert finding["data"]["related_folder"] == "./project/c"
 
 
 def test_folder_mode_reports_its_own_progress(tmp_path, fake_embedder, monkeypatch, capsys):
@@ -172,7 +176,7 @@ def test_folder_mode_reports_its_own_progress(tmp_path, fake_embedder, monkeypat
     main([str(root), "--folder", "--verbose", "--json"])
     output = capsys.readouterr()
     assert "placing" in output.err
-    assert json.loads(output.out)["root"] == str(root)
+    assert json.loads(output.out)["roots"][0]["root"] == str(root)
 
     main([str(root), "--verbose", "--json"])
     assert "placing" not in capsys.readouterr().err

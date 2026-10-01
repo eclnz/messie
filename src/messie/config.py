@@ -21,7 +21,8 @@ IGNORE_DIRS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class Settings:
-    max_depth: int = 3
+    #: Deepest folder level judged and reported; ``None`` means no limit.
+    max_depth: int | None = None
     include_hidden: bool = False
     follow_symlinks: bool = False
     max_files_per_dir: int = 2000
