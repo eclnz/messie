@@ -22,7 +22,8 @@ def test_folder_placement_ground_truth(case: PlacementCase, tmp_path, real_embed
     expected = case.build(root)
     for candidate, destination in expected.items():
         assert (root / candidate).is_dir()
-        assert (root / destination).is_dir()
+        if destination is not None:
+            assert (root / destination).is_dir()
     results = analyze_tree(
         root, DEFAULT_SETTINGS.with_(report_folder_placement=True), embedder=real_embedder
     )
@@ -32,7 +33,8 @@ def test_folder_placement_ground_truth(case: PlacementCase, tmp_path, real_embed
             if finding.code != "folder_placement":
                 continue
             assert isinstance(finding.data, PlacementEvidence)
-            observed[str(analysis.path.relative_to(root))] = str(
-                finding.data.suggested_parent.relative_to(root)
+            related = finding.data.related_folder
+            observed[str(analysis.path.relative_to(root))] = (
+                str(related.relative_to(root)) if related is not None else None
             )
     assert observed == expected

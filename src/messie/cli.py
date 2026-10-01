@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-f", "--folder", action="store_true",
-        help="look for coherent folders whose contents fit another location better",
+        help="find folders whose contents look out of place in their surroundings",
     )
     chatter = parser.add_mutually_exclusive_group()
     chatter.add_argument(

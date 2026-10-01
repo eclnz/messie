@@ -46,7 +46,7 @@ def test_folder_mode_finds_a_coherent_misplaced_subtree(tmp_path, fake_embedder)
     )
     evidence = _placement(enabled, misplaced)
     assert evidence is not None
-    assert evidence.suggested_parent == destination
+    assert evidence.related_folder == destination
     assert evidence.supported_fraction >= 0.6
 
 
@@ -65,11 +65,11 @@ def test_folder_mode_preserves_multiple_topics(tmp_path, fake_embedder):
     )
     evidence = _placement(results, misplaced)
     assert evidence is not None
-    assert evidence.suggested_parent == destination
+    assert evidence.related_folder == destination
     assert evidence.subtree_files == 6
 
 
-def test_one_matching_topic_is_insufficient(tmp_path, fake_embedder):
+def test_one_matching_topic_cannot_establish_a_related_folder(tmp_path, fake_embedder):
     root = tmp_path / "project"
     candidate = root / "a" / "b"
     _files(root / "a", "alpha")
@@ -80,10 +80,12 @@ def test_one_matching_topic_is_insufficient(tmp_path, fake_embedder):
     results = analyze_tree(
         root, DEFAULT_SETTINGS.with_(report_folder_placement=True), embedder=fake_embedder
     )
-    assert _placement(results, candidate) is None
+    evidence = _placement(results, candidate)
+    assert evidence is not None
+    assert evidence.related_folder is None
 
 
-def test_no_alternative_means_no_placement_claim(tmp_path, fake_embedder):
+def test_clear_local_outlier_needs_no_alternative(tmp_path, fake_embedder):
     root = tmp_path / "project"
     candidate = root / "a" / "b"
     _files(root / "a", "alpha")
@@ -93,7 +95,9 @@ def test_no_alternative_means_no_placement_claim(tmp_path, fake_embedder):
     results = analyze_tree(
         root, DEFAULT_SETTINGS.with_(report_folder_placement=True), embedder=fake_embedder
     )
-    assert _placement(results, candidate) is None
+    evidence = _placement(results, candidate)
+    assert evidence is not None
+    assert evidence.related_folder is None
 
 
 def test_tiny_surroundings_cannot_establish_a_misplacement(tmp_path, fake_embedder):
@@ -109,7 +113,7 @@ def test_tiny_surroundings_cannot_establish_a_misplacement(tmp_path, fake_embedd
     assert _placement(results, candidate) is None
 
 
-def test_sibling_destination_is_excluded_from_current_context(tmp_path, fake_embedder):
+def test_parallel_siblings_do_not_propose_moves_into_each_other(tmp_path, fake_embedder):
     root = tmp_path / "project"
     candidate = root / "a" / "b"
     destination = root / "a" / "c"
@@ -120,9 +124,8 @@ def test_sibling_destination_is_excluded_from_current_context(tmp_path, fake_emb
     results = analyze_tree(
         root, DEFAULT_SETTINGS.with_(report_folder_placement=True), embedder=fake_embedder
     )
-    evidence = _placement(results, candidate)
-    assert evidence is not None
-    assert evidence.suggested_parent == destination
+    assert _placement(results, candidate) is None
+    assert _placement(results, destination) is None
 
 
 def test_folder_flag_reports_placement_in_json(tmp_path, fake_embedder, monkeypatch, capsys):
@@ -146,7 +149,7 @@ def test_folder_flag_reports_placement_in_json(tmp_path, fake_embedder, monkeypa
     payload = json.loads(capsys.readouterr().out)
     folder = next(item for item in payload["folders"] if item["path"] == str(candidate))
     finding = next(item for item in folder["findings"] if item["code"] == "folder_placement")
-    assert finding["data"]["suggested_parent"] == str(destination)
+    assert finding["data"]["related_folder"] == str(destination)
 
 
 def test_folder_mode_reports_its_own_progress(tmp_path, fake_embedder, monkeypatch, capsys):

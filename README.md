@@ -31,7 +31,7 @@ messie ~/Drive --depth 5      # recurse further; default is 3
 messie ~/Downloads --all      # analyse all folders, including those normally skipped
 messie ~/Downloads --json     # JSON output
 messie ~/Drive -v             # progress on stderr
-messie ~/Drive --folder        # suggest folders whose contents fit elsewhere
+messie ~/Drive --folder        # find folders unusual for their surroundings
 messie -a --sa --color        # my favorite
 messie -h                     # see the help page for more args
 ```
@@ -50,7 +50,7 @@ messie ~/Downloads -a --sa --color | grep 2026 # the same could be achieved with
 | nothing in common | no subject connects the files |
 | strays | files that do not fit a meaningful group |
 | misfiled neighbours | loose files resembling a subfolder's contents |
-| folder placement | a subtree fitting another location better; opt in with `-f` |
+| folder placement | a subtree that looks out of place locally; opt in with `-f` |
 | overcrowded | many loose files; opt in with `-c` |
 | debris | temporary, empty, or never-named files |
 | version pileups | multiple revisions of one file |
@@ -61,8 +61,10 @@ Signals combine into a score: **tidy** (0–24), **lived-in** (25–49),
 **messy** (50–74), or **chaotic** (75–100). Folders with fewer than six files
 are too small to judge for the usual signals. With `--folder`, Messie can still
 report a placement finding for a folder with few direct files when its subtree
-has enough readable files. Placement suggestions compare file contents and
-names without rules for particular folder layouts or names.
+has enough readable files. It compares the subtree with its surroundings and
+allows for variety among sibling folders. A related folder elsewhere can help
+explain a finding, but Messie does not claim it is the right destination.
+The checks use contents and names without rules for particular folder layouts.
 
 ## Notes
 
@@ -78,7 +80,7 @@ your folders.
 ## Example data
 
 `tests/corpus/` contains synthetic documents and builders for test folders.
-Its placement cases label expected moves and clean layouts, including decoys
+Its placement cases label local outliers and clean layouts, including decoys
 with partly matching contents, shared names, and too little context.
 Build a demonstration tree with:
 
